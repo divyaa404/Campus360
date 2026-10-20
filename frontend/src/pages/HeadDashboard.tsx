@@ -52,20 +52,19 @@ export const HeadDashboard: React.FC = () => {
     setIsLoading(true);
     try {
       const allEvents = await api.getEvents();
-      // Filter events relevant to this head's organization or created by this head
-      const headOrg = user?.organization?.toLowerCase() || '';
-      const relevantEvents = allEvents.filter(
-        (e) =>
-          e.createdByHeadId === user?.id ||
-          (headOrg && e.organizer.toLowerCase().includes(headOrg.split(' ')[0])) ||
-          allEvents.length <= 4 // fallback to show initial events if new head
+      // STRICT ISOLATION: Only show events created by this specific head
+      // A head can NEVER see other heads' events
+      const myEvents = allEvents.filter(
+        (e) => e.createdByHeadId === user?.id
       );
 
-      setEvents(relevantEvents);
-      if (relevantEvents.length > 0) {
-        const defaultEvtId = relevantEvents[0].id;
+      setEvents(myEvents);
+      if (myEvents.length > 0) {
+        const defaultEvtId = myEvents[0].id;
         setSelectedEventId(defaultEvtId);
         loadEventRegistrations(defaultEvtId);
+      } else {
+        setRegistrations([]);
       }
     } catch (err) {
       console.error('Failed to load events:', err);
@@ -305,6 +304,25 @@ export const HeadDashboard: React.FC = () => {
               </div>
             );
           })}
+
+          {events.length === 0 && !isLoading && (
+            <div className="col-span-3 rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 p-12 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-500 mb-4">
+                <Calendar className="h-8 w-8" />
+              </div>
+              <h3 className="font-extrabold text-slate-900 text-lg">No Events Posted Yet</h3>
+              <p className="text-sm text-slate-500 font-medium mt-2 max-w-sm mx-auto">
+                You haven't posted any events yet. Click "Post New Event" above to create your first event — it will be published to the student campus feed automatically.
+              </p>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="mt-6 flex items-center gap-2 mx-auto rounded-2xl bg-gradient-to-r from-brand-orange to-brand-pink px-6 py-3 text-sm font-bold text-white shadow-md hover:shadow-lg hover:scale-[1.02] transition-all"
+              >
+                <Plus className="h-4 w-4" />
+                Post Your First Event
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

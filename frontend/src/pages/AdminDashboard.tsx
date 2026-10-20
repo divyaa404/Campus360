@@ -53,10 +53,11 @@ export const AdminDashboard: React.FC = () => {
             Generate Head ID & Pass
           </Link>
           <Link
-            to="/admin/social-feeds"
+            to="/admin/events"
             className="flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-slate-800 hover:shadow-lg transition-all"
           >
-            Campus Social & All Events
+            <Calendar className="h-4 w-4" />
+            Events & Rosters
           </Link>
           <Link
             to="/admin/opportunities"

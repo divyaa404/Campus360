@@ -25,7 +25,7 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminNoticesPage } from './pages/AdminNoticesPage';
 import { AdminOpportunitiesPage } from './pages/AdminOpportunitiesPage';
 import { AdminGenerateHeadsPage } from './pages/AdminGenerateHeadsPage';
-import { AdminSocialAndFeedsPage } from './pages/AdminSocialAndFeedsPage';
+import { AdminEventsAndRostersPage } from './pages/AdminEventsAndRostersPage';
 
 // Head Pages
 import { HeadDashboard } from './pages/HeadDashboard';
@@ -193,11 +193,7 @@ const App: React.FC = () => {
           />
           <Route
             path="/admin/social-feeds"
-            element={
-              <Layout>
-                <AdminSocialAndFeedsPage />
-              </Layout>
-            }
+            element={<Navigate to="/admin/events" replace />}
           />
           <Route
             path="/admin/notices"
@@ -219,17 +215,29 @@ const App: React.FC = () => {
             path="/admin/events"
             element={
               <Layout>
-                <AdminSocialAndFeedsPage />
+                <AdminEventsAndRostersPage />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/scholarships"
+            element={
+              <Layout>
+                <ScholarshipsPage />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/achievements"
+            element={
+              <Layout>
+                <AchievementsPage />
               </Layout>
             }
           />
           <Route
             path="/admin/users"
-            element={
-              <Layout>
-                <AdminGenerateHeadsPage />
-              </Layout>
-            }
+            element={<Navigate to="/admin/generate-heads" replace />}
           />
           <Route
             path="/admin/notifications"

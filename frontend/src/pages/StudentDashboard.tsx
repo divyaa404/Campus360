@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { api, type EventItem } from '../services/api';
 import { 
   Megaphone, 
   Briefcase, 
@@ -16,12 +17,30 @@ import {
 
 export const StudentDashboard: React.FC = () => {
   const { user } = useAuth();
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [myRegisteredEventIds, setMyRegisteredEventIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const fetchLiveEvents = async () => {
+      try {
+        const evts = await api.getEvents();
+        setEvents(evts);
+        if (user?.id) {
+          const regs = await api.getMyRegistrations(user.id);
+          setMyRegisteredEventIds(regs.map((r) => r.eventId));
+        }
+      } catch (err) {
+        console.error('Failed to load events for student dashboard:', err);
+      }
+    };
+    fetchLiveEvents();
+  }, [user]);
 
   // Realistic mock data
   const stats = [
     { name: 'New Notices', count: 5, color: 'text-brand-orange bg-brand-orange/10', icon: Megaphone },
     { name: 'Opportunities', count: 18, color: 'text-brand-blue bg-brand-blue/10', icon: Briefcase },
-    { name: 'Upcoming Events', count: 4, color: 'text-brand-green bg-brand-green/10', icon: Calendar },
+    { name: 'Upcoming Events', count: events.length || 4, color: 'text-brand-green bg-brand-green/10', icon: Calendar },
     { name: 'Mock Exams Completed', count: 12, color: 'text-brand-cyan bg-brand-cyan/10', icon: CheckSquare },
     { name: 'Bookmarks Saved', count: 8, color: 'text-brand-pink bg-brand-pink/10', icon: Bookmark },
   ];
@@ -257,32 +276,45 @@ export const StudentDashboard: React.FC = () => {
 
       {/* BOTTOM: Upcoming Events */}
       <div className="space-y-6">
-        <h2 className="text-xl font-extrabold text-slate-800">Upcoming Campus Events</h2>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-800">Live Campus Events & Drives</h2>
+            <p className="text-xs text-slate-400 font-medium">Published by department heads, clubs, and placement cell</p>
+          </div>
+          <Link to="/events" className="text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1">
+            <span>Explore All Events</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
         <div className="grid gap-5 sm:grid-cols-2">
-          {upcomingEvents.map((evt) => (
-            <div key={evt.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-              <div className="space-y-2">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-brand-green bg-brand-green/10 px-2.5 py-1 rounded-xl">
-                  {evt.organizer}
-                </span>
-                <h3 className="font-bold text-slate-800 text-base">{evt.name}</h3>
-                <div className="flex flex-wrap gap-4 text-xs text-slate-400 font-medium">
-                  <span>Date: {evt.date}</span>
-                  <span>Time: {evt.time}</span>
-                  <span>Venue: {evt.venue}</span>
+          {events.slice(0, 4).map((evt) => {
+            const isRegistered = myRegisteredEventIds.includes(evt.id);
+            return (
+              <div key={evt.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col justify-between gap-4 sm:flex-row sm:items-center hover:shadow-md transition-shadow">
+                <div className="space-y-2">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-xl border border-indigo-100">
+                    {evt.organizer}
+                  </span>
+                  <h3 className="font-bold text-slate-800 text-base">{evt.title}</h3>
+                  <div className="flex flex-wrap gap-4 text-xs text-slate-500 font-medium">
+                    <span>Date: {evt.date}</span>
+                    <span>Time: {evt.time}</span>
+                    <span>Venue: {evt.venue}</span>
+                  </div>
                 </div>
+                <Link
+                  to="/events"
+                  className={`rounded-2xl px-5 py-2.5 text-xs font-bold text-center transition-all shrink-0 ${
+                    isRegistered
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm'
+                  }`}
+                >
+                  {isRegistered ? 'Registered ✓' : 'Register Now'}
+                </Link>
               </div>
-              <button
-                className={`rounded-2xl px-5 py-2.5 text-xs font-bold transition-all ${
-                  evt.status === 'Registered'
-                    ? 'bg-slate-100 text-slate-500 cursor-default'
-                    : 'bg-brand-orange text-white hover:bg-opacity-90 shadow-sm'
-                }`}
-              >
-                {evt.status === 'Registered' ? 'Registered' : 'Register Now'}
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

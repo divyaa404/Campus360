@@ -128,16 +128,22 @@ app.post('/api/admin/generate-head', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Head Name and Organization are required' });
   }
 
-  // Auto-generate a clean login ID / email if not provided
-  const generatedEmail = (
-    email ||
-    `${organization.toLowerCase().replace(/[^a-z0-9]/g, '')}.head@campus360.edu`
-  ).trim();
+  // Auto-generate clean, unique login ID / email
+  let generatedEmail = (email || '').trim();
+  const orgSlug = organization.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const nameSlug = name.toLowerCase().replace(/[^a-z0-9]/g, '.');
 
-  // Check if email already exists
-  const existing = db.findUserByEmail(generatedEmail);
-  if (existing) {
-    return res.status(400).json({ error: `An account with ID "${generatedEmail}" already exists.` });
+  if (!generatedEmail) {
+    generatedEmail = `${nameSlug}.${orgSlug}@campus360.edu`;
+    if (db.findUserByEmail(generatedEmail)) {
+      generatedEmail = `${orgSlug}.head${Math.floor(100 + Math.random() * 900)}@campus360.edu`;
+    }
+  } else {
+    // If the provided email already exists, make it unique
+    if (db.findUserByEmail(generatedEmail)) {
+      const parts = generatedEmail.split('@');
+      generatedEmail = `${parts[0]}.${Math.floor(100 + Math.random() * 900)}@${parts[1] || 'campus360.edu'}`;
+    }
   }
 
   // Auto-generate strong temporary password if not provided
@@ -199,6 +205,25 @@ app.get('/api/admin/heads', (req: Request, res: Response) => {
   });
 
   return res.json(formattedHeads);
+});
+
+// Super Admin deletes / removes head account
+app.delete('/api/admin/heads/:headId', (req: Request, res: Response) => {
+  const headId = String(req.params.headId);
+  const head = db.findUserById(headId);
+  if (!head) {
+    return res.status(404).json({ error: 'Head account not found' });
+  }
+
+  const deleted = db.deleteUser(headId);
+  if (!deleted) {
+    return res.status(500).json({ error: 'Failed to remove head account' });
+  }
+
+  return res.json({
+    message: `Head account for "${head.name}" (${head.organization}) has been removed.`,
+    headId,
+  });
 });
 
 // Super Admin resets head password
@@ -337,7 +362,7 @@ app.post('/api/events', (req: Request, res: Response) => {
 
 // Student applies / registers for an event
 app.post('/api/events/:eventId/register', (req: Request, res: Response) => {
-  const { eventId } = req.params;
+  const eventId = String(req.params.eventId);
   const { studentId, studentName, studentEmail, rollNumber, department, year, phone } = req.body;
 
   const event = db.findEventById(eventId);
@@ -369,7 +394,7 @@ app.post('/api/events/:eventId/register', (req: Request, res: Response) => {
 
 // Head gets list of students who applied for an event
 app.get('/api/events/:eventId/registrations', (req: Request, res: Response) => {
-  const { eventId } = req.params;
+  const eventId = String(req.params.eventId);
   const event = db.findEventById(eventId);
 
   if (!event) {
@@ -386,7 +411,7 @@ app.get('/api/events/:eventId/registrations', (req: Request, res: Response) => {
 
 // Head or Admin updates registration status (Shortlisted, Selected, Attended)
 app.patch('/api/events/:eventId/registrations/:regId', (req: Request, res: Response) => {
-  const { regId } = req.params;
+  const regId = String(req.params.regId);
   const { status } = req.body;
 
   if (!status) {
@@ -403,7 +428,7 @@ app.patch('/api/events/:eventId/registrations/:regId', (req: Request, res: Respo
 
 // Get registrations for a specific student
 app.get('/api/events/my-registrations/:studentId', (req: Request, res: Response) => {
-  const { studentId } = req.params;
+  const studentId = String(req.params.studentId);
   const registrations = db.getRegistrationsByStudent(studentId);
 
   const enriched = registrations.map((r) => {

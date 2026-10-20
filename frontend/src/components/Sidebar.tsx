@@ -52,20 +52,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
   const adminLinks = [
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Generate Head IDs', path: '/admin/generate-heads', icon: KeyRound },
-    { name: 'Social & Campus Feeds', path: '/admin/social-feeds', icon: MessageSquare },
+    { name: 'Events & Rosters', path: '/admin/events', icon: Calendar },
     { name: 'Notices', path: '/admin/notices', icon: Megaphone },
     { name: 'Opportunities', path: '/admin/opportunities', icon: Briefcase },
-    { name: 'Events & Rosters', path: '/admin/events', icon: Calendar },
     { name: 'Scholarships', path: '/admin/scholarships', icon: Award },
     { name: 'Achievements', path: '/admin/achievements', icon: Trophy },
-    { name: 'Head Accounts', path: '/admin/users', icon: Users },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
 
   const headLinks = [
     { name: 'Head Dashboard', path: '/head/dashboard', icon: LayoutDashboard },
     { name: 'Events & Student Lists', path: '/head/dashboard', icon: Calendar },
-    { name: 'Campus Social Feed', path: '/admin/social-feeds', icon: MessageSquare },
     { name: 'Explore All Events', path: '/events', icon: Building2 },
     { name: 'Account Settings', path: '/settings', icon: Settings },
   ];

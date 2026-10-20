@@ -12,50 +12,6 @@
       "createdAt": "2026-08-01T10:00:00Z"
     },
     {
-      "id": "head-ieee",
-      "email": "ieee.head@campus360.edu",
-      "password": "Pass@4052",
-      "role": "HEAD",
-      "name": "Prof. Rajesh Varma",
-      "organization": "IEEE Student Branch",
-      "headTitle": "IEEE Student Branch Chair",
-      "mustChangePassword": true,
-      "createdAt": "2026-08-10T11:00:00Z"
-    },
-    {
-      "id": "head-tnp",
-      "email": "tnp.head@campus360.edu",
-      "password": "Divya@123",
-      "role": "HEAD",
-      "name": "Dr. Ananya Sen",
-      "organization": "Training & Placement Cell (TnP)",
-      "headTitle": "Chief Placement Officer",
-      "mustChangePassword": false,
-      "createdAt": "2026-08-12T09:30:00Z"
-    },
-    {
-      "id": "head-cultural",
-      "email": "cultural.head@campus360.edu",
-      "password": "head123",
-      "role": "HEAD",
-      "name": "Aryan Saxena",
-      "organization": "Cultural Society",
-      "headTitle": "Cultural Secretary",
-      "mustChangePassword": false,
-      "createdAt": "2026-08-15T14:00:00Z"
-    },
-    {
-      "id": "head-acm",
-      "email": "acm.head@campus360.edu",
-      "password": "head123",
-      "role": "HEAD",
-      "name": "Tanvi Deshmukh",
-      "organization": "ACM Student Chapter",
-      "headTitle": "ACM Chapter Lead",
-      "mustChangePassword": true,
-      "createdAt": "2026-08-16T12:00:00Z"
-    },
-    {
       "id": "student-1",
       "email": "student@campus360.edu",
       "password": "student123",
@@ -93,20 +49,25 @@
       "semester": 4,
       "phone": "+91 97222 33445",
       "createdAt": "2026-08-19T09:00:00Z"
-    },
-    {
-      "id": "head-mvg9rodw",
-      "email": "robotics.head@campus360.edu",
-      "password": "Pass@9605",
-      "role": "HEAD",
-      "name": "Vikram Malhotra",
-      "organization": "Robotics & Automation Club",
-      "headTitle": "Robotics Convener",
-      "mustChangePassword": true,
-      "createdAt": "2026-10-20T05:55:29.204Z"
     }
   ],
   "events": [
+    {
+      "id": "e-mvgnvcph",
+      "title": "SSSSSSSSSSSSS",
+      "category": "Hackathons",
+      "organizer": "Central Administration",
+      "createdByHeadId": "admin-1",
+      "date": "2026-11-10",
+      "time": "10:00 AM",
+      "venue": "Main Campus Auditorium & Seminar Hall 1",
+      "desc": "SSSSSSSSSSS",
+      "image": "https://images.unsplash.com/photo-1515187029135-18ee286d815b?w=800&auto=format&fit=crop&q=60",
+      "deadline": "2026-11-05",
+      "maxCapacity": 150,
+      "eligibility": "Open to all students (CSE, ECE, IT, ME, EE)",
+      "createdAt": "2026-10-20T12:30:15.317Z"
+    },
     {
       "id": "e-ieee-1",
       "title": "IEEE National Hackathon - CodeGrid 2026",
@@ -173,6 +134,19 @@
     }
   ],
   "registrations": [
+    {
+      "id": "reg-mvgnvp2j",
+      "eventId": "e-mvgnvcph",
+      "studentId": "student-1",
+      "studentName": "Aarav Sharma",
+      "studentEmail": "divyagsharma2006@gmail.com",
+      "rollNumber": "2023CSE042",
+      "department": "Computer Science & Engineering",
+      "year": 3,
+      "phone": "+91 98765 43210",
+      "registeredAt": "2026-10-20T12:30:31.339Z",
+      "status": "Registered"
+    },
     {
       "id": "reg-1",
       "eventId": "e-ieee-1",
@@ -253,6 +227,18 @@
     }
   ],
   "socialPosts": [
+    {
+      "id": "sp-mvgnvcpj",
+      "authorName": "Central Administration",
+      "authorRole": "HEAD",
+      "authorOrg": "Central Administration",
+      "content": "📢 New Event Announced: \"SSSSSSSSSSSSS\" on 2026-11-10! Check events section to register now.",
+      "tag": "Event Announcement",
+      "imageUrl": "https://images.unsplash.com/photo-1515187029135-18ee286d815b?w=800&auto=format&fit=crop&q=60",
+      "likes": 12,
+      "commentsCount": 2,
+      "createdAt": "2026-10-20T12:30:15.319Z"
+    },
     {
       "id": "sp-1",
       "authorName": "Dr. Sarah Jenkins",
