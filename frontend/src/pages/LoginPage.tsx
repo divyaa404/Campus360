@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 import type { UserRole } from '../context/AuthContext';
 import {
   ShieldCheck,
@@ -18,109 +19,201 @@ import {
   Globe,
   Sparkles,
   ChevronLeft,
+  User,
+  X,
 } from 'lucide-react';
-
-// Simulated Google OAuth users (real integration would use Supabase OAuth)
-const GOOGLE_DEMO_USERS = [
-  { email: 'student@campus360.edu', name: 'Aarav Sharma', avatar: 'AS', dept: 'CSE' },
-  { email: 'priya.verma@campus360.edu', name: 'Priya Verma', avatar: 'PV', dept: 'ECE' },
-  { email: 'rohit.mehta@campus360.edu', name: 'Rohit Mehta', avatar: 'RM', dept: 'IT' },
-];
 
 type LoginStep =
   | 'role-select'
-  | 'student-google'
-  | 'student-setup'
-  | 'head-email-pass'
-  | 'admin-email-pass';
+  | 'google-continue'
+  | 'user-setup'
+  | 'head-email-pass';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { login, completePasswordChange } = useAuth();
+  const { login, loginWithGoogle, setupUserAccount, completePasswordChange } = useAuth();
 
   const [step, setStep] = useState<LoginStep>('role-select');
   const [selectedRole, setSelectedRole] = useState<UserRole>('STUDENT');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Google OAuth simulated state
-  const [googleUser, setGoogleUser] = useState<(typeof GOOGLE_DEMO_USERS)[0] | null>(null);
-  const [showGooglePicker, setShowGooglePicker] = useState(false);
+  // Google OAuth / Account state
+  const [googleEmail, setGoogleEmail] = useState('divyagsharma1415@gmail.com');
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
 
-  // Student setup form (after Google)
+  // 4 Fields after Google Login (for Students and Super Admin)
+  const [fullName, setFullName] = useState('Divya Sharma');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [studentPassword, setStudentPassword] = useState('');
-  const [studentConfirmPassword, setStudentConfirmPassword] = useState('');
-  const [showStudentPass, setShowStudentPass] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPass, setShowPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+
+  // Direct email & password sign in fallback
+  const [showDirectPasswordLogin, setShowDirectPasswordLogin] = useState(false);
+  const [directEmail, setDirectEmail] = useState('');
+  const [directPassword, setDirectPassword] = useState('');
+  const [showDirectPass, setShowDirectPass] = useState(false);
 
   // Head login fields
   const [headEmail, setHeadEmail] = useState('');
   const [headPassword, setHeadPassword] = useState('');
   const [showHeadPass, setShowHeadPass] = useState(false);
 
-  // Admin login fields
-  const [adminEmail, setAdminEmail] = useState('admin@campus360.edu');
-  const [adminPassword, setAdminPassword] = useState('');
-  const [showAdminPass, setShowAdminPass] = useState(false);
-
-  // First-time Head password reset modal
+  // Head first-time password reset modal
   const [showPasswordChangeModal, setShowPasswordChangeModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
 
-  // — Step: Role select
+  // Check if user just returned from real Google OAuth redirect
+  useEffect(() => {
+    const checkOAuthSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('email', session.user.email)
+            .maybeSingle();
+
+          if (profile && profile.phone) {
+            navigate(profile.role === 'SUPER_ADMIN' ? '/admin/dashboard' : '/dashboard');
+          } else {
+            const userEmail = session.user.email || '';
+            const userName = session.user.user_metadata?.full_name || session.user.user_metadata?.name || userEmail.split('@')[0] || '';
+            setGoogleEmail(userEmail);
+            if (userName) setFullName(userName);
+            setSelectedRole((profile?.role || session.user.user_metadata?.role || 'STUDENT') as UserRole);
+            setStep('user-setup');
+          }
+        }
+      } catch (err) {
+        console.warn('OAuth session check:', err);
+      }
+    };
+    checkOAuthSession();
+  }, [navigate]);
+
+  // Handle role selection
   const handleRoleSelect = (role: UserRole) => {
     setSelectedRole(role);
     setError('');
-    if (role === 'STUDENT') {
-      setStep('student-google');
-    } else if (role === 'HEAD') {
-      setStep('head-email-pass');
+    setShowDirectPasswordLogin(false);
+    if (role === 'STUDENT' || role === 'SUPER_ADMIN') {
+      setStep('google-continue');
+      if (role === 'SUPER_ADMIN') {
+        setDirectEmail('admin@campus360.edu');
+      } else {
+        setDirectEmail('student@campus360.edu');
+      }
     } else {
-      setStep('admin-email-pass');
+      setStep('head-email-pass');
     }
   };
 
-  // — Google OAuth simulation
-  const handleGoogleSignIn = (gUser: (typeof GOOGLE_DEMO_USERS)[0]) => {
-    setGoogleUser(gUser);
-    setShowGooglePicker(false);
-    setStep('student-setup');
+  // Handle clicking "Continue with Google"
+  const handleContinueWithGoogle = () => {
+    setError('');
+    setShowGoogleModal(true);
+  };
+
+  // Handle selecting or entering a Google Account in the modal
+  const handleSelectGoogleAccount = (email: string, defaultName?: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    setGoogleEmail(cleanEmail);
+    if (defaultName) {
+      setFullName(defaultName);
+    } else if (!fullName) {
+      setFullName(cleanEmail.split('@')[0]);
+    }
+    setShowGoogleModal(false);
+    setStep('user-setup');
     setError('');
   };
 
-  // — Student setup submit (after Google)
-  const handleStudentSetup = async (e: React.FormEvent) => {
+  // Handle browser OAuth redirect attempt
+  const handleBrowserOAuth = async () => {
+    setError('');
+    setIsLoading(true);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      setIsLoading(false);
+      setError('OAuth redirect is pending configuration in Google Cloud Console. Choose your Google account directly below.');
+    }
+  };
+
+  // Submit the 4 fields after Google (Full Name, Phone Number, Password, Confirm Password)
+  const handleUserSetupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!phoneNumber.trim() || phoneNumber.trim().length < 10) {
+    if (!fullName.trim()) {
+      setError('Please enter your full name.');
+      return;
+    }
+    const cleanPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
       setError('Please enter a valid 10-digit phone number.');
       return;
     }
-    if (!studentPassword || studentPassword.length < 6) {
+    if (!password || password.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
     }
-    if (studentPassword !== studentConfirmPassword) {
+    if (password !== confirmPassword) {
       setError('Passwords do not match. Please re-enter.');
       return;
     }
 
     setIsLoading(true);
     try {
-      await login('STUDENT', googleUser!.email, 'student123');
-      navigate('/dashboard');
+      await setupUserAccount({
+        email: googleEmail.trim().toLowerCase(),
+        name: fullName.trim(),
+        phone: phoneNumber.trim(),
+        password: password,
+        role: selectedRole,
+        department: selectedRole === 'STUDENT' ? 'Computer Science & Engineering' : undefined,
+      });
+
+      if (selectedRole === 'SUPER_ADMIN') {
+        navigate('/admin/dashboard');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err: any) {
-      setError(err.message || 'Authentication failed. Please try again.');
+      setError(err.message || 'Account setup failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // — Head login submit
+  // Direct email & password submit (for users who already completed setup)
+  const handleDirectPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+    try {
+      await login(selectedRole, directEmail.trim(), directPassword);
+      if (selectedRole === 'SUPER_ADMIN') {
+        navigate('/admin/dashboard');
+      } else {
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Invalid credentials. If first time, please use Continue with Google.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Head login submit
   const handleHeadLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -140,22 +233,7 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // — Admin login submit
-  const handleAdminLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-    try {
-      await login('SUPER_ADMIN', adminEmail.trim(), adminPassword);
-      navigate('/admin/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Invalid admin credentials.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // — Head first-time password change
+  // Head first-time password change submit
   const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -163,13 +241,13 @@ export const LoginPage: React.FC = () => {
       setError('Password must be at least 6 characters.');
       return;
     }
-    if (newPassword !== confirmPassword) {
+    if (newPassword !== confirmNewPassword) {
       setError('Passwords do not match.');
       return;
     }
     setIsLoading(true);
     try {
-      await completePasswordChange(newPassword, confirmPassword);
+      await completePasswordChange(newPassword, confirmNewPassword);
       setPasswordChangeSuccess(true);
       setTimeout(() => navigate('/head/dashboard'), 1200);
     } catch (err: any) {
@@ -235,7 +313,27 @@ export const LoginPage: React.FC = () => {
               </div>
             </button>
 
-            {/* Head Option */}
+            {/* Super Admin Option */}
+            <button
+              onClick={() => handleRoleSelect('SUPER_ADMIN')}
+              className="w-full flex items-center gap-4 rounded-2xl border-2 border-slate-200 bg-white p-5 text-left hover:border-slate-800 hover:bg-slate-50 transition-all group"
+            >
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
+                <ShieldCheck className="h-6 w-6" />
+              </div>
+              <div className="flex-1">
+                <p className="font-extrabold text-slate-900">Super Admin</p>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Generate Head IDs, manage notices, scholarships & campus data
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 rounded-xl bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-700 border border-slate-200">
+                <Globe className="h-3 w-3" />
+                Google Login
+              </div>
+            </button>
+
+            {/* Club / Department Head Option */}
             <button
               onClick={() => handleRoleSelect('HEAD')}
               className="w-full flex items-center gap-4 rounded-2xl border-2 border-slate-200 bg-white p-5 text-left hover:border-indigo-500 hover:bg-indigo-50/30 transition-all group"
@@ -254,47 +352,35 @@ export const LoginPage: React.FC = () => {
                 Admin Credentials
               </div>
             </button>
-
-            {/* Super Admin Option */}
-            <button
-              onClick={() => handleRoleSelect('SUPER_ADMIN')}
-              className="w-full flex items-center gap-4 rounded-2xl border-2 border-slate-200 bg-white p-5 text-left hover:border-slate-700 hover:bg-slate-50 transition-all group"
-            >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
-                <ShieldCheck className="h-6 w-6" />
-              </div>
-              <div className="flex-1">
-                <p className="font-extrabold text-slate-900">Super Admin</p>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  Generate Head IDs, manage notices, scholarships & campus data
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 rounded-xl bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600 border border-slate-200">
-                <Lock className="h-3 w-3" />
-                Secure Access
-              </div>
-            </button>
           </div>
         </div>
       )}
 
-      {/* ====== STEP 2A: Student – Google Sign In ====== */}
-      {step === 'student-google' && (
+      {/* ====== STEP 2: ONE BUTTON "CONTINUE WITH GOOGLE" (For Student and Super Admin) ====== */}
+      {step === 'google-continue' && (
         <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-xl relative z-10 space-y-6">
           <button
             onClick={() => { setStep('role-select'); setError(''); }}
             className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors"
           >
-            <ChevronLeft className="h-4 w-4" /> Back
+            <ChevronLeft className="h-4 w-4" /> Back to roles
           </button>
 
           <div className="text-center space-y-2">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50 text-brand-orange mb-3">
-              <GraduationCap className="h-7 w-7" />
+            <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl mb-3 shadow-sm ${
+              selectedRole === 'SUPER_ADMIN' ? 'bg-slate-900 text-white' : 'bg-orange-50 text-brand-orange'
+            }`}>
+              {selectedRole === 'SUPER_ADMIN' ? (
+                <ShieldCheck className="h-7 w-7" />
+              ) : (
+                <GraduationCap className="h-7 w-7" />
+              )}
             </div>
-            <h2 className="text-2xl font-extrabold text-slate-900">Student Sign In</h2>
+            <h2 className="text-2xl font-extrabold text-slate-900">
+              {selectedRole === 'SUPER_ADMIN' ? 'Super Admin Portal' : 'Student Sign In'}
+            </h2>
             <p className="text-xs text-slate-400 font-medium">
-              Continue with your college Google account
+              Continue with your Google account to access Campus360
             </p>
           </div>
 
@@ -305,93 +391,123 @@ export const LoginPage: React.FC = () => {
             </div>
           )}
 
-          {/* Google Button */}
-          <button
-            onClick={() => { setShowGooglePicker(true); setError(''); }}
-            className="w-full flex items-center justify-center gap-3 rounded-2xl border-2 border-slate-200 bg-white py-4 text-sm font-bold text-slate-700 hover:border-slate-400 hover:bg-slate-50 transition-all shadow-sm"
-          >
-            {/* Google SVG Icon */}
-            <svg className="h-5 w-5" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-            </svg>
-            Continue with Google
-          </button>
-
-          <div className="text-center">
-            <p className="text-[11px] text-slate-400 font-medium">
-              Use your <span className="font-bold text-slate-600">@campus360.edu</span> Google account to sign in securely
-            </p>
+          {/* THE REQUESTED ONE BUTTON: CONTINUE WITH GOOGLE */}
+          <div className="pt-2">
+            <button
+              type="button"
+              id="google-continue-button"
+              onClick={handleContinueWithGoogle}
+              className="w-full flex items-center justify-center gap-3.5 rounded-2xl border-2 border-slate-200 bg-white py-4 px-6 text-sm sm:text-base font-bold text-slate-800 shadow-md hover:border-slate-400 hover:bg-slate-50/80 hover:shadow-lg transition-all active:scale-[0.99] group"
+            >
+              <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              <span>Continue with Google</span>
+            </button>
           </div>
 
-          {/* Demo: Google Account Picker */}
-          {showGooglePicker && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-              <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4">
-                <div className="text-center">
-                  <div className="mx-auto flex h-12 w-12 items-center justify-center mb-3">
-                    <svg className="h-10 w-10" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                    </svg>
+          {/* Fallback Direct Password Login toggle */}
+          <div className="border-t border-slate-100 pt-4 text-center">
+            <button
+              type="button"
+              onClick={() => setShowDirectPasswordLogin(!showDirectPasswordLogin)}
+              className="text-xs text-slate-400 hover:text-slate-600 font-semibold underline transition-colors"
+            >
+              {showDirectPasswordLogin ? 'Hide password sign in' : 'Already set up password? Sign in with email'}
+            </button>
+
+            {showDirectPasswordLogin && (
+              <form onSubmit={handleDirectPasswordSubmit} className="mt-4 space-y-3.5 text-left">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Email</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <input
+                      type="email"
+                      value={directEmail}
+                      onChange={(e) => setDirectEmail(e.target.value)}
+                      required
+                      placeholder="e.g. divyagsharma1415@gmail.com"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3.5 text-xs text-slate-800 outline-none focus:border-slate-400 focus:bg-white"
+                    />
                   </div>
-                  <h3 className="font-extrabold text-slate-900">Choose an account</h3>
-                  <p className="text-xs text-slate-500 mt-1">to continue to Campus360</p>
                 </div>
-                <div className="space-y-2">
-                  {GOOGLE_DEMO_USERS.map((u) => (
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <input
+                      type={showDirectPass ? 'text' : 'password'}
+                      value={directPassword}
+                      onChange={(e) => setDirectPassword(e.target.value)}
+                      required
+                      placeholder="••••••••"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-10 text-xs text-slate-800 outline-none focus:border-slate-400 focus:bg-white"
+                    />
                     <button
-                      key={u.email}
-                      onClick={() => handleGoogleSignIn(u)}
-                      className="w-full flex items-center gap-3 rounded-2xl border border-slate-200 p-3 text-left hover:bg-slate-50 transition-colors"
+                      type="button"
+                      onClick={() => setShowDirectPass(!showDirectPass)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                     >
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-brand-orange to-brand-pink text-white font-bold text-sm shadow-sm shrink-0">
-                        {u.avatar}
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-900 text-sm">{u.name}</p>
-                        <p className="text-xs text-slate-500">{u.email}</p>
-                      </div>
+                      {showDirectPass ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     </button>
-                  ))}
+                  </div>
                 </div>
+
                 <button
-                  onClick={() => setShowGooglePicker(false)}
-                  className="w-full text-xs font-bold text-slate-400 hover:text-slate-600 py-2 transition-colors"
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition-all disabled:opacity-50"
                 >
-                  Cancel
+                  {isLoading ? 'Signing In...' : 'Sign In with Password'}
                 </button>
-              </div>
-            </div>
-          )}
+              </form>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ====== STEP 2B: Student – Post-Google Setup (Phone + Password) ====== */}
-      {step === 'student-setup' && googleUser && (
+      {/* ====== STEP 3: ASKS (1) FULL NAME, (2) PHONE NUMBER, (3) PASSWORD, (4) CONFIRM PASSWORD ====== */}
+      {step === 'user-setup' && (
         <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-xl relative z-10 space-y-6">
-          {/* Google user badge */}
-          <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-100 p-3.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-brand-orange to-brand-pink text-white font-bold text-sm shadow-sm shrink-0">
-              {googleUser.avatar}
+          <button
+            onClick={() => { setStep('google-continue'); setError(''); }}
+            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors"
+          >
+            <ChevronLeft className="h-4 w-4" /> Back
+          </button>
+
+          {/* Connected Google Account Banner */}
+          <div className="flex items-center justify-between rounded-2xl bg-emerald-50 border border-emerald-100 p-3.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-600 text-white font-bold text-xs shrink-0 shadow-sm">
+                {(fullName || googleEmail || 'U').slice(0, 2).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-slate-900 text-xs truncate">{googleEmail}</p>
+                <p className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Google Connected • {selectedRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Student'}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-bold text-slate-900 text-sm">{googleUser.name}</p>
-              <p className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Verified via Google
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowGoogleModal(true)}
+              className="text-[11px] font-bold text-slate-500 hover:text-slate-800 underline shrink-0 ml-2"
+            >
+              Change
+            </button>
           </div>
 
           <div className="text-center space-y-1">
-            <h2 className="text-xl font-extrabold text-slate-900">Complete Your Profile</h2>
+            <h2 className="text-xl font-extrabold text-slate-900">Set Up Your Profile & Password</h2>
             <p className="text-xs text-slate-400 font-medium">
-              Set your phone number and secure campus password
+              Please enter your full name, phone number, and secure password
             </p>
           </div>
 
@@ -402,8 +518,26 @@ export const LoginPage: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleStudentSetup} className="space-y-4">
-            {/* Phone Number */}
+          <form onSubmit={handleUserSetupSubmit} className="space-y-4">
+            {/* FIELD 1: Full Name */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                Full Name
+              </label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="e.g. Divya Sharma"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-4 text-sm text-slate-800 outline-none transition-all focus:border-brand-orange focus:bg-white"
+                />
+              </div>
+            </div>
+
+            {/* FIELD 2: Phone Number */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                 Phone Number
@@ -416,38 +550,38 @@ export const LoginPage: React.FC = () => {
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-4 text-sm text-slate-800 outline-none transition-all focus:border-slate-400 focus:bg-white"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-4 text-sm text-slate-800 outline-none transition-all focus:border-brand-orange focus:bg-white"
                 />
               </div>
             </div>
 
-            {/* Password */}
+            {/* FIELD 3: Password */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                Create Password
+                Password
               </label>
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                 <input
-                  type={showStudentPass ? 'text' : 'password'}
+                  type={showPass ? 'text' : 'password'}
                   placeholder="Minimum 6 characters"
-                  value={studentPassword}
-                  onChange={(e) => setStudentPassword(e.target.value)}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
                   minLength={6}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-12 text-sm text-slate-800 outline-none transition-all focus:border-slate-400 focus:bg-white"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-12 text-sm text-slate-800 outline-none transition-all focus:border-brand-orange focus:bg-white"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowStudentPass(!showStudentPass)}
+                  onClick={() => setShowPass(!showPass)}
                   className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                 >
-                  {showStudentPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
-            {/* Confirm Password */}
+            {/* FIELD 4: Confirm Password */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                 Confirm Password
@@ -455,24 +589,31 @@ export const LoginPage: React.FC = () => {
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                 <input
-                  type={showStudentPass ? 'text' : 'password'}
+                  type={showConfirmPass ? 'text' : 'password'}
                   placeholder="Re-enter your password"
-                  value={studentConfirmPassword}
-                  onChange={(e) => setStudentConfirmPassword(e.target.value)}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-4 text-sm text-slate-800 outline-none transition-all focus:border-slate-400 focus:bg-white"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-12 text-sm text-slate-800 outline-none transition-all focus:border-brand-orange focus:bg-white"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPass(!showConfirmPass)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showConfirmPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 
-            {/* Validators */}
+            {/* Validation indicators */}
             <div className="flex items-center gap-4 text-[11px] text-slate-400 font-semibold">
               <span className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${studentPassword.length >= 6 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                <span className={`h-2 w-2 rounded-full ${password.length >= 6 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                 6+ characters
               </span>
               <span className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${studentPassword && studentPassword === studentConfirmPassword ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                <span className={`h-2 w-2 rounded-full ${password && password === confirmPassword ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                 Passwords match
               </span>
             </div>
@@ -480,16 +621,22 @@ export const LoginPage: React.FC = () => {
             <button
               type="submit"
               disabled={isLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-brand-orange to-brand-pink py-3.5 text-sm font-bold text-white shadow-lg hover:opacity-95 hover:scale-[1.01] transition-all disabled:opacity-50"
+              className={`flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-white shadow-lg hover:opacity-95 hover:scale-[1.01] transition-all disabled:opacity-50 ${
+                selectedRole === 'SUPER_ADMIN'
+                  ? 'bg-slate-900 hover:bg-slate-800'
+                  : 'bg-gradient-to-r from-brand-orange to-brand-pink'
+              }`}
             >
               {isLoading ? (
                 <span className="flex items-center gap-2">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Setting up account...
+                  Saving in Supabase...
                 </span>
               ) : (
                 <>
-                  <span>Enter Campus360</span>
+                  <span>
+                    {selectedRole === 'SUPER_ADMIN' ? 'Enter Super Admin Dashboard' : 'Enter Campus360'}
+                  </span>
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}
@@ -498,14 +645,14 @@ export const LoginPage: React.FC = () => {
         </div>
       )}
 
-      {/* ====== STEP 3: Head Login ====== */}
+      {/* ====== STEP 4: Head Login ====== */}
       {step === 'head-email-pass' && (
         <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-xl relative z-10 space-y-6">
           <button
             onClick={() => { setStep('role-select'); setError(''); }}
             className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors"
           >
-            <ChevronLeft className="h-4 w-4" /> Back
+            <ChevronLeft className="h-4 w-4" /> Back to roles
           </button>
 
           <div className="text-center space-y-2">
@@ -514,7 +661,7 @@ export const LoginPage: React.FC = () => {
             </div>
             <h2 className="text-2xl font-extrabold text-slate-900">Head Login</h2>
             <p className="text-xs text-slate-400 font-medium max-w-xs mx-auto">
-              Use the email & password generated by the Super Admin. You'll be prompted to set a permanent password on first login.
+              Use the email & password generated by the Super Admin. You will set your own secure password on first login.
             </p>
           </div>
 
@@ -591,7 +738,7 @@ export const LoginPage: React.FC = () => {
             </button>
           </form>
 
-          {/* Demo credentials */}
+          {/* Quick Demo Head Accounts */}
           <div className="border-t border-slate-100 pt-4 space-y-2">
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Demo Head Accounts</p>
             <div className="grid grid-cols-2 gap-2">
@@ -605,7 +752,7 @@ export const LoginPage: React.FC = () => {
                   key={demo.email}
                   type="button"
                   onClick={() => { setHeadEmail(demo.email); setHeadPassword(demo.pass); setError(''); }}
-                  className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-2.5 text-left hover:bg-indigo-100/60 transition-colors"
+                  className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-2 text-left hover:bg-indigo-100/60 transition-colors"
                 >
                   <p className="text-[11px] font-bold text-indigo-700">{demo.label}</p>
                   <p className="text-[10px] text-slate-500 font-medium truncate">{demo.email}</p>
@@ -616,96 +763,119 @@ export const LoginPage: React.FC = () => {
         </div>
       )}
 
-      {/* ====== STEP 4: Super Admin Login ====== */}
-      {step === 'admin-email-pass' && (
-        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-xl relative z-10 space-y-6">
-          <button
-            onClick={() => { setStep('role-select'); setError(''); }}
-            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors"
-          >
-            <ChevronLeft className="h-4 w-4" /> Back
-          </button>
-
-          <div className="text-center space-y-2">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-800 mb-3">
-              <ShieldCheck className="h-7 w-7" />
+      {/* ====== GOOGLE ACCOUNT CHOOSER MODAL ====== */}
+      {showGoogleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                <h3 className="text-lg font-bold text-slate-900">Sign in with Google</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGoogleModal(false)}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-            <h2 className="text-2xl font-extrabold text-slate-900">Super Admin Login</h2>
-            <p className="text-xs text-slate-400 font-medium">Restricted access – Authorized personnel only</p>
-          </div>
 
-          {error && (
-            <div className="flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-600">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{error}</span>
+            <p className="text-xs text-slate-500">
+              Choose an account to continue to Campus360 as <span className="font-bold text-slate-800">{selectedRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Student'}</span>:
+            </p>
+
+            <div className="space-y-2">
+              {/* Primary User Account */}
+              <button
+                type="button"
+                onClick={() => handleSelectGoogleAccount('divyagsharma1415@gmail.com', 'Divya Sharma')}
+                className="w-full flex items-center justify-between rounded-2xl border-2 border-orange-200 bg-orange-50/40 p-3.5 text-left hover:border-brand-orange hover:bg-orange-50 transition-all group shadow-xs"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-brand-orange to-brand-pink text-white font-bold text-sm shadow-xs shrink-0">
+                    DS
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-900 text-sm group-hover:text-brand-orange transition-colors">Divya Sharma</p>
+                    <p className="text-xs text-slate-500 truncate">divyagsharma1415@gmail.com</p>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-white px-2.5 py-1 text-[11px] font-bold text-brand-orange border border-orange-200 shrink-0">
+                  Select →
+                </div>
+              </button>
+
+              {/* Demo Accounts */}
+              {[
+                { name: selectedRole === 'SUPER_ADMIN' ? 'Dr. Sarah Jenkins' : 'Aarav Sharma', email: selectedRole === 'SUPER_ADMIN' ? 'admin@campus360.edu' : 'student@campus360.edu', avatar: selectedRole === 'SUPER_ADMIN' ? 'SJ' : 'AS' }
+              ].map((acc) => (
+                <button
+                  key={acc.email}
+                  type="button"
+                  onClick={() => handleSelectGoogleAccount(acc.email, acc.name)}
+                  className="w-full flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 text-left hover:border-slate-300 hover:bg-slate-50 transition-all group"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 font-bold text-xs shrink-0">
+                      {acc.avatar}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-800 text-xs truncate">{acc.name}</p>
+                      <p className="text-[11px] text-slate-400 truncate">{acc.email}</p>
+                    </div>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-slate-400 group-hover:text-slate-700 shrink-0" />
+                </button>
+              ))}
             </div>
-          )}
 
-          <form onSubmit={handleAdminLogin} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">Admin Email</label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+            {/* Custom Google Account input */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2.5">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+                Or enter another Google / Gmail address:
+              </label>
+              <div className="flex gap-2">
                 <input
                   type="email"
-                  value={adminEmail}
-                  onChange={(e) => setAdminEmail(e.target.value)}
-                  required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-4 text-sm text-slate-800 outline-none transition-all focus:border-slate-500 focus:bg-white"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">Password</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-                <input
-                  type={showAdminPass ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
-                  required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-12 text-sm text-slate-800 outline-none transition-all focus:border-slate-500 focus:bg-white"
+                  placeholder="yourname@gmail.com"
+                  value={customGoogleEmail}
+                  onChange={(e) => setCustomGoogleEmail(e.target.value)}
+                  className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-brand-orange"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowAdminPass(!showAdminPass)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  disabled={!customGoogleEmail.trim() || !customGoogleEmail.includes('@')}
+                  onClick={() => handleSelectGoogleAccount(customGoogleEmail.trim())}
+                  className="rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-slate-800 transition-all disabled:opacity-40 shrink-0"
                 >
-                  {showAdminPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  Continue
                 </button>
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-3.5 text-sm font-bold text-white shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50"
-            >
-              {isLoading ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Authenticating...
-                </span>
-              ) : (
-                <>
-                  <span>Sign in as Super Admin</span>
-                  <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs font-semibold text-amber-700">
-            Demo: <span className="font-bold">admin@campus360.edu</span> / <span className="font-bold">admin123</span>
+            {/* Browser Redirect Option */}
+            <div className="text-center pt-1">
+              <button
+                type="button"
+                onClick={handleBrowserOAuth}
+                className="text-[11px] text-slate-400 hover:text-slate-600 underline font-medium"
+              >
+                Or try browser redirect to Google OAuth
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* ====== HEAD FIRST-TIME PASSWORD CHANGE MODAL ====== */}
       {showPasswordChangeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
           <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-2xl space-y-6">
             <div className="text-center space-y-2">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
@@ -761,8 +931,8 @@ export const LoginPage: React.FC = () => {
                     <input
                       type={showNewPassword ? 'text' : 'password'}
                       placeholder="Re-enter new password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
                       required
                       className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-800 outline-none transition-all focus:border-indigo-400 focus:bg-white"
                     />
@@ -775,7 +945,7 @@ export const LoginPage: React.FC = () => {
                     6+ characters
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className={`h-2 w-2 rounded-full ${newPassword && newPassword === confirmPassword ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                    <span className={`h-2 w-2 rounded-full ${newPassword && newPassword === confirmNewPassword ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                     Passwords match
                   </span>
                 </div>
@@ -796,4 +966,3 @@ export const LoginPage: React.FC = () => {
     </div>
   );
 };
-

@@ -1,4 +1,5 @@
 // Campus360 Central API Client
+import { supabase } from '../lib/supabase';
 
 export type UserRole = 'STUDENT' | 'SUPER_ADMIN' | 'HEAD';
 
@@ -828,6 +829,22 @@ export const api = {
       };
       saveStored(STORAGE_KEYS.HEADS, [newHeadItem, ...current.filter((h) => h.id !== newHeadItem.id)]);
 
+      // Real-time Supabase sync
+      try {
+        await supabase.from('head_credentials').upsert({
+          id: res.credentials.id,
+          name: res.credentials.name,
+          email: res.credentials.email.toLowerCase(),
+          organization: res.credentials.organization,
+          head_title: res.credentials.headTitle,
+          temp_password: res.credentials.temporaryPassword,
+          status: 'Pending First-Time Password Set',
+          must_change_password: true,
+        }, { onConflict: 'email' });
+      } catch (e) {
+        console.warn('Supabase head store notice:', e);
+      }
+
       return res;
     } catch (err: any) {
       // Local fallback in case backend is offline
@@ -854,6 +871,22 @@ export const api = {
       const current = getStored<HeadAccount[]>(STORAGE_KEYS.HEADS, SEED_HEADS);
       saveStored(STORAGE_KEYS.HEADS, [newHeadItem, ...current]);
 
+      // Real-time Supabase sync on fallback
+      try {
+        await supabase.from('head_credentials').upsert({
+          id: newHeadItem.id,
+          name: newHeadItem.name,
+          email: newHeadItem.email.toLowerCase(),
+          organization: newHeadItem.organization,
+          head_title: newHeadItem.headTitle,
+          temp_password: finalPass,
+          status: 'Pending First-Time Password Set',
+          must_change_password: true,
+        }, { onConflict: 'email' });
+      } catch (e) {
+        console.warn('Supabase head store notice:', e);
+      }
+
       return {
         message: `Head credentials successfully generated for ${data.organization}!`,
         credentials: {
@@ -871,6 +904,30 @@ export const api = {
   },
 
   getHeads: async () => {
+    // 1. Try real-time Supabase head_credentials table
+    try {
+      const { data: sbHeads } = await supabase.from('head_credentials').select('*');
+      if (sbHeads && sbHeads.length > 0) {
+        const mapped: HeadAccount[] = sbHeads.map((h: any) => ({
+          id: h.id,
+          name: h.name,
+          email: h.email,
+          organization: h.organization,
+          headTitle: h.head_title,
+          mustChangePassword: h.must_change_password,
+          status: h.status || 'Active',
+          createdAt: h.created_at,
+          eventsCount: h.events_count || 0,
+          totalRegistrations: h.total_registrations || 0,
+        }));
+        saveStored(STORAGE_KEYS.HEADS, mapped);
+        return mapped;
+      }
+    } catch (err) {
+      // Supabase fetch notice
+    }
+
+    // 2. Try backend API
     try {
       const data = await request<HeadAccount[]>('/admin/heads');
       if (Array.isArray(data) && data.length > 0) {
@@ -884,6 +941,10 @@ export const api = {
   },
 
   deleteHead: async (headId: string) => {
+    try {
+      await supabase.from('head_credentials').delete().eq('id', headId);
+    } catch (e) {}
+
     try {
       await request<{ message: string; headId: string }>(`/admin/heads/${headId}`, {
         method: 'DELETE',
