@@ -24,6 +24,11 @@ import { SettingsPage } from './pages/SettingsPage';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminNoticesPage } from './pages/AdminNoticesPage';
 import { AdminOpportunitiesPage } from './pages/AdminOpportunitiesPage';
+import { AdminGenerateHeadsPage } from './pages/AdminGenerateHeadsPage';
+import { AdminSocialAndFeedsPage } from './pages/AdminSocialAndFeedsPage';
+
+// Head Pages
+import { HeadDashboard } from './pages/HeadDashboard';
 
 // Basic admin component shells for subpages
 const AdminPlaceholder: React.FC<{ title: string }> = ({ title }) => (
@@ -151,12 +156,46 @@ const App: React.FC = () => {
             }
           />
 
+          {/* Head Dashboard Protected Routing */}
+          <Route
+            path="/head/dashboard"
+            element={
+              <Layout>
+                <HeadDashboard />
+              </Layout>
+            }
+          />
+          <Route
+            path="/head/events"
+            element={
+              <Layout>
+                <HeadDashboard />
+              </Layout>
+            }
+          />
+
           {/* Admin Dashboard Protected Routing */}
           <Route
             path="/admin/dashboard"
             element={
               <Layout>
                 <AdminDashboard />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/generate-heads"
+            element={
+              <Layout>
+                <AdminGenerateHeadsPage />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/social-feeds"
+            element={
+              <Layout>
+                <AdminSocialAndFeedsPage />
               </Layout>
             }
           />
@@ -180,31 +219,7 @@ const App: React.FC = () => {
             path="/admin/events"
             element={
               <Layout>
-                <AdminPlaceholder title="Manage Events" />
-              </Layout>
-            }
-          />
-          <Route
-            path="/admin/scholarships"
-            element={
-              <Layout>
-                <AdminPlaceholder title="Manage Scholarships" />
-              </Layout>
-            }
-          />
-          <Route
-            path="/admin/achievements"
-            element={
-              <Layout>
-                <AdminPlaceholder title="Manage Achievements" />
-              </Layout>
-            }
-          />
-          <Route
-            path="/admin/documents"
-            element={
-              <Layout>
-                <AdminPlaceholder title="Manage Documents" />
+                <AdminSocialAndFeedsPage />
               </Layout>
             }
           />
@@ -212,7 +227,7 @@ const App: React.FC = () => {
             path="/admin/users"
             element={
               <Layout>
-                <AdminPlaceholder title="Student Accounts Directory" />
+                <AdminGenerateHeadsPage />
               </Layout>
             }
           />

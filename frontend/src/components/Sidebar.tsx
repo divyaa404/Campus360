@@ -17,7 +17,10 @@ import {
   LogOut,
   Users,
   Bell,
-  BarChart3
+  BarChart3,
+  Building2,
+  KeyRound,
+  MessageSquare
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -35,7 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
     { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Notices', path: '/notices', icon: Megaphone },
     { name: 'Opportunities', path: '/opportunities', icon: Briefcase },
-    { name: 'Events', path: '/events', icon: Calendar },
+    { name: 'Events & Drives', path: '/events', icon: Calendar },
     { name: 'Scholarships', path: '/scholarships', icon: Award },
     { name: 'Achievements', path: '/achievements', icon: Trophy },
     { name: 'Mock Tests', path: '/mock-tests', icon: CheckSquare },
@@ -48,19 +51,38 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
 
   const adminLinks = [
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
+    { name: 'Generate Head IDs', path: '/admin/generate-heads', icon: KeyRound },
+    { name: 'Social & Campus Feeds', path: '/admin/social-feeds', icon: MessageSquare },
     { name: 'Notices', path: '/admin/notices', icon: Megaphone },
     { name: 'Opportunities', path: '/admin/opportunities', icon: Briefcase },
-    { name: 'Events', path: '/admin/events', icon: Calendar },
+    { name: 'Events & Rosters', path: '/admin/events', icon: Calendar },
     { name: 'Scholarships', path: '/admin/scholarships', icon: Award },
     { name: 'Achievements', path: '/admin/achievements', icon: Trophy },
-    { name: 'Documents', path: '/admin/documents', icon: FolderOpen },
-    { name: 'Users', path: '/admin/users', icon: Users },
-    { name: 'Notifications', path: '/admin/notifications', icon: Bell },
-    { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+    { name: 'Head Accounts', path: '/admin/users', icon: Users },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
 
-  const links = user.role === 'ADMIN' ? adminLinks : studentLinks;
+  const headLinks = [
+    { name: 'Head Dashboard', path: '/head/dashboard', icon: LayoutDashboard },
+    { name: 'Events & Student Lists', path: '/head/dashboard', icon: Calendar },
+    { name: 'Campus Social Feed', path: '/admin/social-feeds', icon: MessageSquare },
+    { name: 'Explore All Events', path: '/events', icon: Building2 },
+    { name: 'Account Settings', path: '/settings', icon: Settings },
+  ];
+
+  let links = studentLinks;
+  if (user.role === 'SUPER_ADMIN') {
+    links = adminLinks;
+  } else if (user.role === 'HEAD') {
+    links = headLinks;
+  }
+
+  const roleBadge =
+    user.role === 'SUPER_ADMIN'
+      ? 'Super Admin'
+      : user.role === 'HEAD'
+      ? user.organization || 'Club / Dept Head'
+      : 'Student';
 
   return (
     <>
@@ -90,18 +112,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
         </div>
 
         {/* User Info Capsule */}
-        <div className="mt-8 flex items-center gap-3 rounded-2xl bg-slate-50 p-4 border border-slate-100">
-          <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-brand-blue to-brand-cyan flex items-center justify-center text-white font-bold shadow-sm">
+        <div className="mt-7 flex items-center gap-3 rounded-2xl bg-slate-50 p-3.5 border border-slate-100">
+          <div
+            className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center text-white font-bold shadow-sm ${
+              user.role === 'SUPER_ADMIN'
+                ? 'bg-slate-900'
+                : user.role === 'HEAD'
+                ? 'bg-gradient-to-tr from-indigo-600 to-violet-600'
+                : 'bg-gradient-to-tr from-brand-blue to-brand-cyan'
+            }`}
+          >
             {user.name.charAt(0)}
           </div>
           <div className="overflow-hidden">
-            <h4 className="truncate font-semibold text-sm text-slate-800">{user.name}</h4>
-            <span className="text-xs font-medium text-slate-400 capitalize">{user.role.toLowerCase()}</span>
+            <h4 className="truncate font-bold text-xs text-slate-900">{user.name}</h4>
+            <span className="truncate block text-[10px] font-semibold text-indigo-600">{roleBadge}</span>
           </div>
         </div>
 
         {/* Navigation Links */}
-        <nav className="mt-8 flex-1 space-y-1 overflow-y-auto px-1 pr-1 custom-scrollbar">
+        <nav className="mt-6 flex-1 space-y-1 overflow-y-auto px-1 pr-1 custom-scrollbar">
           {links.map((link) => {
             const Icon = link.icon;
             const isActive = location.pathname === link.path;
@@ -110,14 +140,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
                 key={link.name}
                 to={link.path}
                 onClick={() => setIsOpen(false)}
-                className={`flex items-center gap-3.5 rounded-xl px-4 py-3 text-sm font-semibold transition-all duration-200 ${
+                className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-bold transition-all duration-200 ${
                   isActive
                     ? 'bg-slate-900 text-white shadow-sm'
                     : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
                 }`}
               >
-                <Icon className={`h-5 w-5 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'}`} />
-                {link.name}
+                <Icon className={`h-4.5 w-4.5 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'}`} />
+                <span>{link.name}</span>
               </Link>
             );
           })}
@@ -130,10 +160,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
               logout();
               setIsOpen(false);
             }}
-            className="flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-sm font-semibold text-rose-500 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+            className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-bold text-rose-500 hover:bg-rose-50 hover:text-rose-600 transition-colors"
           >
-            <LogOut className="h-5 w-5 text-rose-400" />
-            Logout
+            <LogOut className="h-4.5 w-4.5 text-rose-400" />
+            Sign Out
           </button>
         </div>
       </aside>

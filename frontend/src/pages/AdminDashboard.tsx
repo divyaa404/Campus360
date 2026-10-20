@@ -44,13 +44,19 @@ export const AdminDashboard: React.FC = () => {
           <h1 className="text-3xl font-extrabold text-slate-900">Admin Dashboard</h1>
           <p className="text-sm text-slate-500 font-medium">Manage and monitor Campus360 engagement, notices, and applications.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Link
-            to="/admin/notices"
-            className="flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-slate-800 hover:shadow-lg transition-all"
+            to="/admin/generate-heads"
+            className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-indigo-700 hover:shadow-lg transition-all"
           >
             <Plus className="h-4 w-4" />
-            Post Notice
+            Generate Head ID & Pass
+          </Link>
+          <Link
+            to="/admin/social-feeds"
+            className="flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-slate-800 hover:shadow-lg transition-all"
+          >
+            Campus Social & All Events
           </Link>
           <Link
             to="/admin/opportunities"
