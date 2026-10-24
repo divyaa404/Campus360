@@ -1,72 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Megaphone, Search, AlertCircle, Bookmark, Download, Filter, Eye } from 'lucide-react';
+import { api, type NoticeItem } from '../services/api';
 
 export const NoticesPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([]);
   const [selectedNotice, setSelectedNotice] = useState<any | null>(null);
+  const [notices, setNotices] = useState<NoticeItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Expanded realistic mock database
-  const notices = [
-    {
-      id: 'n-1',
-      title: 'T&P Placement Drive: Google India recruitment cycle open',
-      source: 'T&P Cell',
-      category: 'T&P',
-      date: '2026-08-30',
-      desc: 'Applications are invited from 2027 batch CSE/IT students for Software Engineering internship role. Package details and links attached. Students must maintain a CGPA of 8.0 and above.',
-      isImportant: true,
-      attachment: 'google_jd_2027.pdf'
-    },
-    {
-      id: 'n-2',
-      title: 'R&D Cell: Project Expo Registration deadline extended',
-      source: 'R&D Cell',
-      category: 'R&D',
-      date: '2026-08-29',
-      desc: 'Annual technical project competition registration has been extended. Submit project abstract to head cell directly. Top 3 teams win cash rewards of up to 50k.',
-      isImportant: false,
-    },
-    {
-      id: 'n-3',
-      title: 'Mid-Sem Examination Schedule Fall Semester',
-      source: 'Academic Admin',
-      category: 'College',
-      date: '2026-08-28',
-      desc: 'Mid semester exams will commence from September 18. Detailed date sheet is now available for download. Ensure you clear all outstanding library dues.',
-      isImportant: true,
-      attachment: 'datesheet_midsem_2026.pdf'
-    },
-    {
-      id: 'n-4',
-      title: 'Annual Cultural Fest "Echoes 2026" Registrations Open',
-      source: 'Cultural Committee',
-      category: 'Cultural',
-      date: '2026-08-27',
-      desc: 'Registrations for stage play, group dance, fashion show and battle of bands are officially open. Contact student representatives at cultural room.',
-      isImportant: false,
-    },
-    {
-      id: 'n-5',
-      title: 'Inter-College Sports Meet: Squad selection trials',
-      source: 'Sports Department',
-      category: 'Sports',
-      date: '2026-08-26',
-      desc: 'Trials for Cricket, Football, Basketball, and Athletics squads start tomorrow at 7:00 AM on the main fields. Carry college ID card.',
-      isImportant: false,
-    },
-    {
-      id: 'n-6',
-      title: 'Hackathon: CodeCraft 2.0 registrations started',
-      source: 'Coding Club',
-      category: 'Clubs',
-      date: '2026-08-25',
-      desc: 'Coding Club presents CodeCraft 2.0 Hackathon on Sept 10. Win prize pool of 1 Lakh. Theme will be revealed on site.',
-      isImportant: true,
-      attachment: 'hackathon_rules_2.0.pdf'
-    }
-  ];
+  useEffect(() => {
+    const loadNotices = async () => {
+      setIsLoading(true);
+      try {
+        const data = await api.getNotices();
+        setNotices(data);
+      } catch (err) {
+        console.error('Failed to load notices:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadNotices();
+  }, []);
 
   const categories = ['All', 'College', 'Department', 'T&P', 'R&D', 'Clubs', 'Sports', 'Cultural', 'Important'];
 

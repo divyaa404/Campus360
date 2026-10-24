@@ -1,57 +1,63 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Megaphone, Plus, Trash2, Edit, AlertCircle, Calendar } from 'lucide-react';
+import { api, type NoticeItem } from '../services/api';
 
 export const AdminNoticesPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
-  const [notices, setNotices] = useState([
-    {
-      id: 'n-1',
-      title: 'T&P Placement Drive: Google India recruitment cycle open',
-      source: 'T&P Cell',
-      category: 'Placement',
-      date: 'Aug 30, 2026',
-      desc: 'Applications are open for 2027 batch CSE/IT students.',
-      isImportant: true,
-    },
-    {
-      id: 'n-2',
-      title: 'R&D Cell: Project Expo Registration deadline extended',
-      source: 'R&D Cell',
-      category: 'Research',
-      date: 'Aug 29, 2026',
-      desc: 'Annual technical project competition registration has been extended.',
-      isImportant: false,
-    }
-  ]);
+  const [notices, setNotices] = useState<NoticeItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Placement');
   const [desc, setDesc] = useState('');
   const [isImportant, setIsImportant] = useState(false);
 
-  const handlePost = (e: React.FormEvent) => {
+  const loadNotices = async () => {
+    setIsLoading(true);
+    try {
+      const data = await api.getNotices();
+      setNotices(data);
+    } catch (err) {
+      console.error('Failed to load notices:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadNotices();
+  }, []);
+
+  const handlePost = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !desc) return;
 
-    const newNotice = {
-      id: `n-${Date.now()}`,
-      title,
-      source: 'College Admin',
-      category,
-      date: 'Today',
-      desc,
-      isImportant,
-    };
+    try {
+      const created = await api.postNotice({
+        title,
+        category,
+        desc,
+        source: 'College Admin',
+        isImportant,
+      });
 
-    setNotices([newNotice, ...notices]);
-    setTitle('');
-    setDesc('');
-    setIsImportant(false);
-    setShowForm(false);
+      setNotices([created, ...notices]);
+      setTitle('');
+      setDesc('');
+      setIsImportant(false);
+      setShowForm(false);
+    } catch (err) {
+      console.error('Failed to post notice:', err);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setNotices(notices.filter((n) => n.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      await api.deleteNotice(id);
+      setNotices(notices.filter((n) => n.id !== id));
+    } catch (err) {
+      console.error('Failed to delete notice:', err);
+    }
   };
 
   return (

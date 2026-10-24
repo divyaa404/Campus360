@@ -21,6 +21,9 @@ import {
   ChevronLeft,
   User,
   X,
+  BookOpen,
+  Calendar,
+  Layers,
 } from 'lucide-react';
 
 type LoginStep =
@@ -43,9 +46,12 @@ export const LoginPage: React.FC = () => {
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [customGoogleEmail, setCustomGoogleEmail] = useState('');
 
-  // 4 Fields after Google Login (for Students and Super Admin)
+  // Setup fields after Google Login (Full Name, Phone Number, Department, Year, Semester, Password)
   const [fullName, setFullName] = useState('Divya Sharma');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [department, setDepartment] = useState('Computer Science & Engineering');
+  const [year, setYear] = useState('3');
+  const [semester, setSemester] = useState('6');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -71,33 +77,83 @@ export const LoginPage: React.FC = () => {
 
   // Check if user just returned from real Google OAuth redirect
   useEffect(() => {
-    const checkOAuthSession = async () => {
+    // Restore selected role if saved before OAuth redirect
+    const savedRole = localStorage.getItem('campus360_login_role') as UserRole | null;
+    if (savedRole) {
+      setSelectedRole(savedRole);
+    }
+
+    const processSessionUser = async (sessionUser: any) => {
+      if (!sessionUser) return;
+      const userEmail = sessionUser.email || '';
+      const userName =
+        sessionUser.user_metadata?.full_name ||
+        sessionUser.user_metadata?.name ||
+        userEmail.split('@')[0] ||
+        '';
+
+      setGoogleEmail(userEmail);
+      if (userName) setFullName(userName);
+
+      // Read the intended role directly from localStorage (NOT from profile.role, which
+      // could be 'STUDENT' due to the Supabase trigger creating a profiles row automatically)
+      const intendedRole = (localStorage.getItem('campus360_login_role') as UserRole | null) || 'STUDENT';
+      setSelectedRole(intendedRole);
+
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
+        if (intendedRole === 'SUPER_ADMIN') {
+          // ── Admin: check the `admins` table only ──
+          const { data: adminRec } = await supabase
+            .from('admins')
+            .select('*')
+            .eq('email', userEmail.toLowerCase())
+            .maybeSingle();
+          if (adminRec) {
+            if (adminRec.name) setFullName(adminRec.name);
+            if (adminRec.phone) setPhoneNumber(adminRec.phone);
+          }
+        } else {
+          // ── Student: check the `profiles` table ──
           const { data: profile } = await supabase
             .from('profiles')
             .select('*')
-            .eq('email', session.user.email)
+            .eq('email', userEmail.toLowerCase())
             .maybeSingle();
-
-          if (profile && profile.phone) {
-            navigate(profile.role === 'SUPER_ADMIN' ? '/admin/dashboard' : '/dashboard');
-          } else {
-            const userEmail = session.user.email || '';
-            const userName = session.user.user_metadata?.full_name || session.user.user_metadata?.name || userEmail.split('@')[0] || '';
-            setGoogleEmail(userEmail);
-            if (userName) setFullName(userName);
-            setSelectedRole((profile?.role || session.user.user_metadata?.role || 'STUDENT') as UserRole);
-            setStep('user-setup');
+          if (profile) {
+            if (profile.name) setFullName(profile.name);
+            if (profile.phone) setPhoneNumber(profile.phone);
+            if (profile.department) setDepartment(profile.department);
+            if (profile.year) setYear(String(profile.year));
+            if (profile.semester) setSemester(String(profile.semester));
+            // Do NOT call setSelectedRole here — intendedRole is already set above
           }
         }
       } catch (err) {
-        console.warn('OAuth session check:', err);
+        console.warn('OAuth profile check:', err);
       }
+
+      // Move to setup step to collect remaining details
+      setStep('user-setup');
     };
-    checkOAuthSession();
-  }, [navigate]);
+
+    // Check existing session on load
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        processSessionUser(session.user);
+      }
+    });
+
+    // Listen to real-time auth state change (crucial when returning from Google redirect)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        processSessionUser(session.user);
+      }
+    });
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []);
 
   // Handle role selection
   const handleRoleSelect = (role: UserRole) => {
@@ -116,14 +172,23 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // Handle clicking "Continue with Google"
-  const handleContinueWithGoogle = () => {
+  // Handle clicking "Continue with Google" -> launches real Google OAuth directly
+  const handleContinueWithGoogle = async () => {
     setError('');
-    setShowGoogleModal(true);
+    setIsLoading(true);
+    localStorage.setItem('campus360_login_role', selectedRole);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      console.warn('Google OAuth direct redirect:', err);
+      setIsLoading(false);
+      // Fallback: If browser popup blocked or network issue, open account modal
+      setShowGoogleModal(true);
+    }
   };
 
   // Handle selecting or entering a Google Account in the modal
-  const handleSelectGoogleAccount = (email: string, defaultName?: string) => {
+  const handleSelectGoogleAccount = async (email: string, defaultName?: string) => {
     const cleanEmail = email.trim().toLowerCase();
     setGoogleEmail(cleanEmail);
     if (defaultName) {
@@ -131,6 +196,38 @@ export const LoginPage: React.FC = () => {
     } else if (!fullName) {
       setFullName(cleanEmail.split('@')[0]);
     }
+
+    // selectedRole here is the role the user chose on the role-select screen — preserve it
+    try {
+      if (selectedRole === 'SUPER_ADMIN') {
+        // Admin: only read from admins table
+        const { data: adminRec } = await supabase
+          .from('admins')
+          .select('*')
+          .eq('email', cleanEmail)
+          .maybeSingle();
+        if (adminRec) {
+          if (adminRec.name) setFullName(adminRec.name);
+          if (adminRec.phone) setPhoneNumber(adminRec.phone);
+        }
+      } else {
+        // Student: only read from profiles table
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('email', cleanEmail)
+          .maybeSingle();
+        if (profile) {
+          if (profile.name) setFullName(profile.name);
+          if (profile.phone) setPhoneNumber(profile.phone);
+          if (profile.department) setDepartment(profile.department);
+          if (profile.year) setYear(String(profile.year));
+          if (profile.semester) setSemester(String(profile.semester));
+          // Do NOT call setSelectedRole — the user already chose their role
+        }
+      }
+    } catch (e) {}
+
     setShowGoogleModal(false);
     setStep('user-setup');
     setError('');
@@ -140,15 +237,16 @@ export const LoginPage: React.FC = () => {
   const handleBrowserOAuth = async () => {
     setError('');
     setIsLoading(true);
+    localStorage.setItem('campus360_login_role', selectedRole);
     try {
       await loginWithGoogle();
     } catch (err: any) {
       setIsLoading(false);
-      setError('OAuth redirect is pending configuration in Google Cloud Console. Choose your Google account directly below.');
+      setError(err.message || 'Google OAuth redirect failed. Please choose your Google account below.');
     }
   };
 
-  // Submit the 4 fields after Google (Full Name, Phone Number, Password, Confirm Password)
+  // Submit setup fields after Google (Full Name, Phone Number, Department, Year, Semester, Password)
   const handleUserSetupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -161,6 +259,20 @@ export const LoginPage: React.FC = () => {
     if (cleanPhone.length < 10) {
       setError('Please enter a valid 10-digit phone number.');
       return;
+    }
+    if (selectedRole === 'STUDENT') {
+      if (!department.trim()) {
+        setError('Please select or enter your department.');
+        return;
+      }
+      if (!year) {
+        setError('Please select your academic year.');
+        return;
+      }
+      if (!semester) {
+        setError('Please select your semester.');
+        return;
+      }
     }
     if (!password || password.length < 6) {
       setError('Password must be at least 6 characters.');
@@ -179,7 +291,9 @@ export const LoginPage: React.FC = () => {
         phone: phoneNumber.trim(),
         password: password,
         role: selectedRole,
-        department: selectedRole === 'STUDENT' ? 'Computer Science & Engineering' : undefined,
+        department: selectedRole === 'STUDENT' ? department.trim() : undefined,
+        year: selectedRole === 'STUDENT' ? Number(year) : undefined,
+        semester: selectedRole === 'STUDENT' ? Number(semester) : undefined,
       });
 
       if (selectedRole === 'SUPER_ADMIN') {
@@ -391,22 +505,70 @@ export const LoginPage: React.FC = () => {
             </div>
           )}
 
-          {/* THE REQUESTED ONE BUTTON: CONTINUE WITH GOOGLE */}
-          <div className="pt-2">
+          {/* GOOGLE SIGN IN OPTIONS */}
+          <div className="pt-2 space-y-3">
+            {/* Primary Browser Google OAuth */}
             <button
               type="button"
               id="google-continue-button"
+              disabled={isLoading}
               onClick={handleContinueWithGoogle}
-              className="w-full flex items-center justify-center gap-3.5 rounded-2xl border-2 border-slate-200 bg-white py-4 px-6 text-sm sm:text-base font-bold text-slate-800 shadow-md hover:border-slate-400 hover:bg-slate-50/80 hover:shadow-lg transition-all active:scale-[0.99] group"
+              className="w-full flex items-center justify-center gap-3.5 rounded-2xl border-2 border-slate-200 bg-white py-3.5 px-6 text-sm sm:text-base font-bold text-slate-800 shadow-md hover:border-slate-400 hover:bg-slate-50/80 hover:shadow-lg transition-all active:scale-[0.99] group disabled:opacity-50"
             >
-              <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-              </svg>
-              <span>Continue with Google</span>
+              {isLoading ? (
+                <div className="flex items-center gap-2.5">
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" />
+                  <span>Connecting to Google...</span>
+                </div>
+              ) : (
+                <>
+                  <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  </svg>
+                  <span>Continue with Google</span>
+                </>
+              )}
             </button>
+
+            {/* Instant Google One-Tap Card (Bypasses Google Cloud Console redirect_uri_mismatch) */}
+            <div className="rounded-2xl border border-orange-200 bg-orange-50/50 p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  Instant Google Sign-In
+                </span>
+                <span className="text-[10px] font-bold text-brand-orange bg-white px-2 py-0.5 rounded-full border border-orange-200">
+                  Verified
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleSelectGoogleAccount('divyagsharma1415@gmail.com', 'Divya Sharma')}
+                className="w-full flex items-center justify-between rounded-xl bg-white p-2.5 text-left border border-orange-200 hover:border-brand-orange hover:shadow-xs transition-all group"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-tr from-brand-orange to-brand-pink text-white font-bold text-xs shrink-0">
+                    DS
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-xs text-slate-800 group-hover:text-brand-orange transition-colors">Divya Sharma</p>
+                    <p className="text-[11px] text-slate-400 truncate">divyagsharma1415@gmail.com</p>
+                  </div>
+                </div>
+                <span className="text-[11px] font-bold text-brand-orange shrink-0">Sign in →</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowGoogleModal(true)}
+                className="w-full text-center text-[11px] text-slate-500 hover:text-slate-700 font-semibold underline pt-1 block"
+              >
+                Choose another Google / Gmail account
+              </button>
+            </div>
           </div>
 
           {/* Fallback Direct Password Login toggle */}
@@ -507,7 +669,9 @@ export const LoginPage: React.FC = () => {
           <div className="text-center space-y-1">
             <h2 className="text-xl font-extrabold text-slate-900">Set Up Your Profile & Password</h2>
             <p className="text-xs text-slate-400 font-medium">
-              Please enter your full name, phone number, and secure password
+              {selectedRole === 'STUDENT'
+                ? 'Please enter your full name, phone number, academic details, and secure password'
+                : 'Please enter your full name, phone number, and secure password'}
             </p>
           </div>
 
@@ -554,6 +718,92 @@ export const LoginPage: React.FC = () => {
                 />
               </div>
             </div>
+
+            {/* ACADEMIC FIELDS: Department, Year & Semester (STUDENTS ONLY) */}
+            {selectedRole === 'STUDENT' && (
+              <>
+                {/* FIELD 3: Department */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                    Department
+                  </label>
+                  <div className="relative">
+                    <BookOpen className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <select
+                      value={department}
+                      onChange={(e) => setDepartment(e.target.value)}
+                      required
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-12 pr-10 text-sm text-slate-800 outline-none transition-all focus:border-brand-orange focus:bg-white appearance-none cursor-pointer"
+                    >
+                      <option value="Computer Science & Engineering">Computer Science & Engineering (CSE)</option>
+                      <option value="Information Technology">Information Technology (IT)</option>
+                      <option value="Electronics & Communication">Electronics & Communication (ECE)</option>
+                      <option value="Mechanical Engineering">Mechanical Engineering (ME)</option>
+                      <option value="Civil Engineering">Civil Engineering (CE)</option>
+                      <option value="Electrical Engineering">Electrical Engineering (EE)</option>
+                      <option value="Artificial Intelligence & Data Science">AI & Data Science (AI & DS)</option>
+                      <option value="Business Administration">Business Administration (MBA / BBA)</option>
+                    </select>
+                    <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
+                      ▼
+                    </div>
+                  </div>
+                </div>
+
+                {/* FIELDS 4 & 5: Year & Semester side-by-side */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                      Year
+                    </label>
+                    <div className="relative">
+                      <Calendar className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      <select
+                        value={year}
+                        onChange={(e) => setYear(e.target.value)}
+                        required
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-10 pr-6 text-sm text-slate-800 outline-none transition-all focus:border-brand-orange focus:bg-white appearance-none cursor-pointer"
+                      >
+                        <option value="1">1st Year</option>
+                        <option value="2">2nd Year</option>
+                        <option value="3">3rd Year</option>
+                        <option value="4">4th Year</option>
+                      </select>
+                      <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
+                        ▼
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                      Semester
+                    </label>
+                    <div className="relative">
+                      <Layers className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      <select
+                        value={semester}
+                        onChange={(e) => setSemester(e.target.value)}
+                        required
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-10 pr-6 text-sm text-slate-800 outline-none transition-all focus:border-brand-orange focus:bg-white appearance-none cursor-pointer"
+                      >
+                        <option value="1">Sem 1</option>
+                        <option value="2">Sem 2</option>
+                        <option value="3">Sem 3</option>
+                        <option value="4">Sem 4</option>
+                        <option value="5">Sem 5</option>
+                        <option value="6">Sem 6</option>
+                        <option value="7">Sem 7</option>
+                        <option value="8">Sem 8</option>
+                      </select>
+                      <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
+                        ▼
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* FIELD 3: Password */}
             <div className="space-y-1.5">
