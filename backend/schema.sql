@@ -179,6 +179,11 @@ CREATE POLICY "achievement_photos_upload"
   ON storage.objects FOR INSERT TO anon, authenticated
   WITH CHECK (bucket_id = 'achievement-photos');
 
+DROP POLICY IF EXISTS "achievement_photos_read" ON storage.objects;
+CREATE POLICY "achievement_photos_read"
+  ON storage.objects FOR SELECT TO anon, authenticated
+  USING (bucket_id = 'achievement-photos');
+
 -- 11. Enable Row Level Security (RLS) on all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.head_credentials ENABLE ROW LEVEL SECURITY;

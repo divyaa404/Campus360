@@ -20,6 +20,8 @@ import {
   Trash2
 } from 'lucide-react';
 
+const fallbackWinnerImage = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60';
+
 export const AchievementsPage: React.FC = () => {
   const { user } = useAuth();
   const [winners, setWinners] = useState<WinnerItem[]>([]);
@@ -330,6 +332,10 @@ export const AchievementsPage: React.FC = () => {
                   <img
                     src={w.image}
                     alt={w.studentName}
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = fallbackWinnerImage;
+                    }}
                     className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/20 to-transparent" />
@@ -638,6 +644,20 @@ export const AchievementsPage: React.FC = () => {
                 <p className="text-[11px] font-medium text-slate-400">
                   {isUploadingPhoto ? 'Uploading photo to Supabase...' : 'Upload an image up to 5 MB, or use an image URL below.'}
                 </p>
+                <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <img
+                    src={winnerForm.image}
+                    alt="Achievement preview"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = fallbackWinnerImage;
+                    }}
+                    className="h-16 w-20 rounded-xl object-cover"
+                  />
+                  <span className="break-all text-[11px] font-medium text-slate-500">
+                    {isUploadingPhoto ? 'Uploading image...' : winnerForm.image}
+                  </span>
+                </div>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {presetPhotos.map((p) => (
                     <button
