@@ -6,6 +6,7 @@ export const AdminNoticesPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [notices, setNotices] = useState<NoticeItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Placement');
@@ -14,11 +15,13 @@ export const AdminNoticesPage: React.FC = () => {
 
   const loadNotices = async () => {
     setIsLoading(true);
+    setError('');
     try {
       const data = await api.getNotices();
       setNotices(data);
     } catch (err) {
       console.error('Failed to load notices:', err);
+      setError(err instanceof Error ? err.message : 'Unable to load notices.');
     } finally {
       setIsLoading(false);
     }
@@ -48,6 +51,7 @@ export const AdminNoticesPage: React.FC = () => {
       setShowForm(false);
     } catch (err) {
       console.error('Failed to post notice:', err);
+      setError(err instanceof Error ? err.message : 'Unable to publish the notice.');
     }
   };
 
@@ -57,11 +61,17 @@ export const AdminNoticesPage: React.FC = () => {
       setNotices(notices.filter((n) => n.id !== id));
     } catch (err) {
       console.error('Failed to delete notice:', err);
+      setError(err instanceof Error ? err.message : 'Unable to delete the notice.');
     }
   };
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div role="alert" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+          {error}
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-slate-900">Manage Notices</h1>

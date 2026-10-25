@@ -9,15 +9,18 @@ export const NoticesPage: React.FC = () => {
   const [selectedNotice, setSelectedNotice] = useState<any | null>(null);
   const [notices, setNotices] = useState<NoticeItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     const loadNotices = async () => {
       setIsLoading(true);
+      setLoadError('');
       try {
         const data = await api.getNotices();
         setNotices(data);
       } catch (err) {
         console.error('Failed to load notices:', err);
+        setLoadError(err instanceof Error ? err.message : 'Unable to load notices.');
       } finally {
         setIsLoading(false);
       }
@@ -46,6 +49,11 @@ export const NoticesPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div role="alert" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+          {loadError}
+        </div>
+      )}
       <div>
         <h1 className="text-3xl font-extrabold text-slate-900">College Notices</h1>
         <p className="text-sm text-slate-500 font-medium">Browse verified updates from all college administration cells and committees.</p>
@@ -84,7 +92,9 @@ export const NoticesPage: React.FC = () => {
 
       {/* Notices Grid */}
       <div className="grid gap-6 md:grid-cols-2">
-        {filteredNotices.length === 0 ? (
+        {isLoading ? (
+          <div className="col-span-2 rounded-3xl border border-blue-100 bg-white py-16 text-center text-sm font-semibold text-slate-500">Loading notices...</div>
+        ) : filteredNotices.length === 0 ? (
           <div className="col-span-2 py-16 text-center space-y-3 bg-white rounded-3xl border border-slate-200/80">
             <Megaphone className="h-10 w-10 text-slate-300 mx-auto" />
             <p className="text-sm font-semibold text-slate-500">No notices found matching current criteria</p>

@@ -81,6 +81,7 @@ export const AdminGenerateHeadsPage: React.FC = () => {
       setHeads(data);
     } catch (err) {
       console.error('Failed to load heads:', err);
+      setError(err instanceof Error ? err.message : 'Unable to load head credentials.');
     } finally {
       setIsLoading(false);
     }
@@ -180,6 +181,7 @@ export const AdminGenerateHeadsPage: React.FC = () => {
       loadHeads();
     } catch (err) {
       console.error('Failed to reset password:', err);
+      setError(err instanceof Error ? err.message : 'Unable to reset the head password.');
     }
   };
 

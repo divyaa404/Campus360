@@ -23,6 +23,7 @@ export const AchievementsPage: React.FC = () => {
   const { user } = useAuth();
   const [winners, setWinners] = useState<WinnerItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
 
@@ -66,11 +67,13 @@ export const AchievementsPage: React.FC = () => {
 
   const loadWinners = async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
       const data = await api.getWinners();
       setWinners(data);
     } catch (err) {
       console.error('Failed to load winners:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to load achievements.');
     } finally {
       setIsLoading(false);
     }
@@ -123,6 +126,7 @@ export const AchievementsPage: React.FC = () => {
       });
     } catch (err) {
       console.error('Failed to add winner:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to save the achievement.');
     } finally {
       setIsSubmitting(false);
     }
@@ -142,6 +146,11 @@ export const AchievementsPage: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      {loadError && (
+        <div role="alert" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+          {loadError}
+        </div>
+      )}
       {/* Top Banner Header */}
       <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-2">

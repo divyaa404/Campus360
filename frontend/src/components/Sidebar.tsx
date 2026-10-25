@@ -99,12 +99,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-brand-orange to-brand-pink text-white font-bold text-xl shadow-md">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-blue-800 text-white font-bold text-xl shadow-md">
             C
           </div>
           <div>
             <span className="font-bold text-xl tracking-tight text-slate-800">Campus</span>
-            <span className="font-bold text-xl tracking-tight text-brand-orange">360</span>
+            <span className="font-bold text-xl tracking-tight text-blue-600">360</span>
           </div>
         </div>
 
@@ -113,10 +113,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
           <div
             className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center text-white font-bold shadow-sm ${
               user.role === 'SUPER_ADMIN'
-                ? 'bg-slate-900'
+                ? 'bg-blue-900'
                 : user.role === 'HEAD'
-                ? 'bg-gradient-to-tr from-indigo-600 to-violet-600'
-                : 'bg-gradient-to-tr from-brand-blue to-brand-cyan'
+                ? 'bg-gradient-to-tr from-blue-600 to-blue-800'
+                : 'bg-gradient-to-tr from-blue-500 to-sky-500'
             }`}
           >
             {user.name.charAt(0)}
@@ -139,8 +139,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
                 onClick={() => setIsOpen(false)}
                 className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-bold transition-all duration-200 ${
                   isActive
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                    ? 'bg-blue-700 text-white shadow-sm'
+                    : 'text-slate-500 hover:bg-blue-50 hover:text-blue-900'
                 }`}
               >
                 <Icon className={`h-4.5 w-4.5 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'}`} />

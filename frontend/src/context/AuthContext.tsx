@@ -270,7 +270,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           department: data.department || 'Computer Science & Engineering',
           year: data.year ? Number(data.year) : 3,
           semester: data.semester ? Number(data.semester) : 6,
-          roll_number: data.rollNumber || '2023CSE042',
           updated_at: new Date().toISOString(),
         };
         const { data: existingProfile } = await supabase.from('profiles').select('id').eq('email', cleanEmail).maybeSingle();
@@ -387,23 +386,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // ── HEAD LOGIN (queries `heads` table first, falls back to `head_credentials`) ──
     if (normalizedRole === 'HEAD') {
       try {
-        // 1. Try `heads` table first (primary)
+        // Use the credential table configured for the head management workflow first.
         let headCred: any = null;
-        const { data: headRec } = await supabase
-          .from('heads')
+        const { data: credentialRec, error: credentialError } = await supabase
+          .from('head_credentials')
           .select('*')
           .ilike('email', cleanEmail)
           .maybeSingle();
-        if (headRec) {
-          headCred = headRec;
+        if (credentialError) throw new Error(`Unable to look up head credentials: ${credentialError.message}`);
+        if (credentialRec) {
+          headCred = credentialRec;
         } else {
-          // Fallback to legacy head_credentials
-          const { data: legacyCred } = await supabase
-            .from('head_credentials')
+          const { data: headRec, error: headError } = await supabase
+            .from('heads')
             .select('*')
             .ilike('email', cleanEmail)
             .maybeSingle();
-          if (legacyCred) headCred = legacyCred;
+          if (headError) throw new Error(`Unable to look up the head account: ${headError.message}`);
+          if (headRec) headCred = headRec;
         }
 
         if (headCred) {

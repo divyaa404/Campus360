@@ -28,6 +28,7 @@ export const HeadDashboard: React.FC = () => {
   const [selectedEventId, setSelectedEventId] = useState<string>('');
   const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
@@ -50,6 +51,7 @@ export const HeadDashboard: React.FC = () => {
 
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
       const allEvents = await api.getEvents();
       // STRICT ISOLATION: Only show events created by this specific head
@@ -68,6 +70,7 @@ export const HeadDashboard: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to load events:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to load head dashboard data.');
     } finally {
       setIsLoading(false);
     }
@@ -79,6 +82,7 @@ export const HeadDashboard: React.FC = () => {
       setRegistrations(res.students);
     } catch (err) {
       console.error('Failed to fetch registrations:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to load event registrations.');
     }
   };
 
@@ -99,6 +103,7 @@ export const HeadDashboard: React.FC = () => {
       );
     } catch (err) {
       console.error('Failed to update status:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to update registration status.');
     }
   };
 
@@ -121,6 +126,7 @@ export const HeadDashboard: React.FC = () => {
       }, 1200);
     } catch (err) {
       console.error('Failed to create event:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to create event.');
     } finally {
       setIsSubmitting(false);
     }
@@ -162,6 +168,11 @@ export const HeadDashboard: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      {loadError && (
+        <div role="alert" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+          {loadError}
+        </div>
+      )}
       {/* Top Head Welcome Banner */}
       <div className="rounded-3xl border border-indigo-100 bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 p-8 text-white shadow-xl relative overflow-hidden">
         <div className="absolute right-0 top-0 -mt-10 -mr-10 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />

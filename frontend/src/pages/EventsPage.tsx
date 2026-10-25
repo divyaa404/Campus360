@@ -22,32 +22,35 @@ export const EventsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [registeredIds, setRegisteredIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   // Registration modal state
   const [selectedEventForReg, setSelectedEventForReg] = useState<EventItem | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [regSuccessMessage, setRegSuccessMessage] = useState('');
   const [studentForm, setStudentForm] = useState({
-    name: user?.name || 'Aarav Sharma',
-    rollNumber: user?.rollNumber || '2023CSE042',
-    department: user?.department || 'Computer Science & Engineering',
-    year: user?.year || 3,
-    phone: user?.phone || '+91 98765 43210',
-    email: user?.email || 'student@campus360.edu',
+    name: user?.name || '',
+    rollNumber: user?.rollNumber || '',
+    department: user?.department || '',
+    year: user?.year || '',
+    phone: user?.phone || '',
+    email: user?.email || '',
   });
 
   const loadEvents = async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
       const data = await api.getEvents();
       setEvents(data);
 
       if (user?.id) {
-        const myRegs = await api.getMyRegistrations(user.id);
+        const myRegs = await api.getMyRegistrations(user.id, user.email);
         setRegisteredIds(myRegs.map((r) => r.eventId));
       }
     } catch (err) {
       console.error('Failed to load events:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to load events.');
     } finally {
       setIsLoading(false);
     }
@@ -80,7 +83,7 @@ export const EventsPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       await api.registerForEvent(selectedEventForReg.id, {
-        studentId: user?.id || 'student-1',
+        studentId: user?.id || '',
         studentName: studentForm.name,
         studentEmail: studentForm.email,
         rollNumber: studentForm.rollNumber,
@@ -115,6 +118,11 @@ export const EventsPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div role="alert" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+          {loadError}
+        </div>
+      )}
       {/* Page Title */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -161,7 +169,9 @@ export const EventsPage: React.FC = () => {
 
       {/* Events Grid */}
       <div className="grid gap-6 md:grid-cols-2">
-        {filteredEvents.length === 0 ? (
+        {isLoading ? (
+          <div className="col-span-2 rounded-3xl border border-blue-100 bg-white py-16 text-center text-sm font-semibold text-slate-500">Loading campus events...</div>
+        ) : filteredEvents.length === 0 ? (
           <div className="col-span-2 py-16 text-center space-y-3 bg-white rounded-3xl border border-slate-200/80">
             <Calendar className="h-10 w-10 text-slate-300 mx-auto" />
             <p className="text-sm font-semibold text-slate-500">No events found matching current criteria</p>
@@ -313,6 +323,8 @@ export const EventsPage: React.FC = () => {
                     <label className="font-bold text-slate-600 uppercase">Year / Sem</label>
                     <input
                       type="number"
+                      min="1"
+                      max="6"
                       value={studentForm.year}
                       onChange={(e) => setStudentForm({ ...studentForm, year: Number(e.target.value) })}
                       required

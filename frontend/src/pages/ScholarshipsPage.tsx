@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   api,
@@ -44,17 +44,32 @@ export const ScholarshipsPage: React.FC = () => {
   const [missingStudents, setMissingStudents] = useState<MissingStudentAlert[]>([]);
   const [notices, setNotices] = useState<ScholarshipNotice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   // Apply Modal State
   const [selectedScholarshipForApply, setSelectedScholarshipForApply] = useState<ScholarshipItem | null>(null);
+  const [showCreateScholarship, setShowCreateScholarship] = useState(false);
+  const [isCreatingScholarship, setIsCreatingScholarship] = useState(false);
+  const [scholarshipForm, setScholarshipForm] = useState({
+    name: '',
+    provider: '',
+    category: 'Merit' as ScholarshipItem['category'],
+    benefits: '',
+    amount: '',
+    eligibility: '',
+    deadline: '',
+    documents: '',
+    totalQuota: '50',
+    description: '',
+  });
   const [applyForm, setApplyForm] = useState({
-    studentName: user?.name || 'Aarav Sharma',
-    studentEmail: user?.email || 'student@campus360.edu',
-    rollNumber: user?.rollNumber || '2023CSE042',
-    department: user?.department || 'Computer Science & Engineering',
-    year: user?.year || 3,
-    cgpa: '9.25',
-    familyIncome: '₹4.5 Lakhs / year',
+    studentName: user?.name || '',
+    studentEmail: user?.email || '',
+    rollNumber: user?.rollNumber || '',
+    department: user?.department || '',
+    year: user?.year || '',
+    cgpa: '',
+    familyIncome: '',
     category: 'General',
     hasTranscripts: true,
     hasIncomeCert: true,
@@ -81,12 +96,16 @@ export const ScholarshipsPage: React.FC = () => {
   const [rosterStatusFilter, setRosterStatusFilter] = useState('All');
   const [remindedIds, setRemindedIds] = useState<string[]>([]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
       const [schs, apps, missing, nots] = await Promise.all([
         api.getScholarships(),
-        api.getScholarshipApplications(),
+        api.getScholarshipApplications(
+          user?.role === 'STUDENT' ? user.id : undefined,
+          user?.role === 'STUDENT' ? user.email : undefined
+        ),
         api.getMissingStudents(),
         api.getScholarshipNotices(),
       ]);
@@ -96,14 +115,47 @@ export const ScholarshipsPage: React.FC = () => {
       setNotices(nots);
     } catch (err) {
       console.error('Failed to load scholarships data:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to load scholarship data.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
+
+  const handleCreateScholarship = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingScholarship(true);
+    setLoadError('');
+    try {
+      const created = await api.createScholarship({
+        ...scholarshipForm,
+        totalQuota: Number(scholarshipForm.totalQuota),
+      });
+      setScholarships((current) => [created, ...current]);
+      setShowCreateScholarship(false);
+      setScholarshipForm({
+        name: '',
+        provider: '',
+        category: 'Merit',
+        benefits: '',
+        amount: '',
+        eligibility: '',
+        deadline: '',
+        documents: '',
+        totalQuota: '50',
+        description: '',
+      });
+      setSuccessToast(`Scholarship "${created.name}" published.`);
+      setTimeout(() => setSuccessToast(''), 4000);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Unable to create scholarship.');
+    } finally {
+      setIsCreatingScholarship(false);
+    }
+  };
 
   const handleApplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,7 +166,7 @@ export const ScholarshipsPage: React.FC = () => {
       const created = await api.applyForScholarship({
         scholarshipId: selectedScholarshipForApply.id,
         scholarshipName: selectedScholarshipForApply.name,
-        studentId: user?.id || 'student-1',
+        studentId: user?.id || '',
         studentName: applyForm.studentName,
         studentEmail: applyForm.studentEmail,
         rollNumber: applyForm.rollNumber,
@@ -130,18 +182,23 @@ export const ScholarshipsPage: React.FC = () => {
       await loadData();
     } catch (err) {
       console.error('Failed to apply:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to submit application.');
     } finally {
       setIsSubmittingApply(false);
     }
   };
 
   const handleStatusChange = async (appId: string, status: ScholarshipApplicant['status']) => {
-    await api.updateScholarshipApplicantStatus(appId, status);
-    setApplications((prev) =>
-      prev.map((a) => (a.id === appId ? { ...a, status } : a))
-    );
-    setSuccessToast(`Application status updated to "${status}"`);
-    setTimeout(() => setSuccessToast(''), 3000);
+    try {
+      await api.updateScholarshipApplicantStatus(appId, status);
+      setApplications((prev) =>
+        prev.map((a) => (a.id === appId ? { ...a, status } : a))
+      );
+      setSuccessToast(`Application status updated to "${status}"`);
+      setTimeout(() => setSuccessToast(''), 3000);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Unable to update application status.');
+    }
   };
 
   const handlePostNotice = async (e: React.FormEvent) => {
@@ -175,6 +232,7 @@ export const ScholarshipsPage: React.FC = () => {
       setTimeout(() => setSuccessToast(''), 4000);
     } catch (err) {
       console.error('Failed to post scholarship notice:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to publish scholarship notice.');
     } finally {
       setIsPostingNotice(false);
     }
@@ -229,6 +287,11 @@ export const ScholarshipsPage: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      {loadError && (
+        <div role="alert" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+          {loadError}
+        </div>
+      )}
       {/* Top Banner Header */}
       <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-2">
@@ -248,13 +311,24 @@ export const ScholarshipsPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 shrink-0">
-          <button
-            onClick={() => setShowPostNoticeModal(true)}
-            className="flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-xs font-bold text-white shadow-md hover:bg-slate-800 transition-all"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Post Scholarship Notice</span>
-          </button>
+          {user?.role === 'SUPER_ADMIN' && (
+            <>
+              <button
+                onClick={() => setShowCreateScholarship(true)}
+                className="flex items-center gap-2 rounded-2xl bg-blue-700 px-5 py-3 text-xs font-bold text-white shadow-md hover:bg-blue-800 transition-all"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Scholarship</span>
+              </button>
+              <button
+                onClick={() => setShowPostNoticeModal(true)}
+                className="flex items-center gap-2 rounded-2xl border border-blue-200 bg-white px-5 py-3 text-xs font-bold text-blue-800 shadow-sm hover:bg-blue-50 transition-all"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Post Scholarship Notice</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -296,17 +370,19 @@ export const ScholarshipsPage: React.FC = () => {
             <span>Who Have Applied ({applications.length})</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('missing')}
-            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-xs font-bold transition-all ${
-              activeTab === 'missing'
-                ? 'bg-amber-600 text-white shadow-md'
-                : 'bg-white text-amber-700 border border-amber-200 hover:bg-amber-50'
-            }`}
-          >
-            <AlertTriangle className="h-4 w-4" />
-            <span>Who Are Missing ({missingStudents.length})</span>
-          </button>
+          {user?.role !== 'STUDENT' && (
+            <button
+              onClick={() => setActiveTab('missing')}
+              className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-xs font-bold transition-all ${
+                activeTab === 'missing'
+                  ? 'bg-blue-700 text-white shadow-md'
+                  : 'bg-white text-blue-800 border border-blue-200 hover:bg-blue-50'
+              }`}
+            >
+              <AlertTriangle className="h-4 w-4" />
+              <span>Who Are Missing ({missingStudents.length})</span>
+            </button>
+          )}
 
           <button
             onClick={() => setActiveTab('notices')}
@@ -357,7 +433,15 @@ export const ScholarshipsPage: React.FC = () => {
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
-            {filteredScholarships.map((s) => (
+            {isLoading ? (
+              <div className="col-span-2 rounded-3xl border border-blue-100 bg-white py-16 text-center text-sm font-semibold text-slate-500">
+                Loading scholarships...
+              </div>
+            ) : filteredScholarships.length === 0 ? (
+              <div className="col-span-2 rounded-3xl border border-blue-100 bg-white py-16 text-center text-sm font-semibold text-slate-500">
+                No scholarships match your search.
+              </div>
+            ) : filteredScholarships.map((s) => (
               <div
                 key={s.id}
                 className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-6"
@@ -509,29 +593,23 @@ export const ScholarshipsPage: React.FC = () => {
                     </td>
 
                     <td className="py-4 px-4 text-right">
-                      <select
-                        value={app.status}
-                        onChange={(e) =>
-                          handleStatusChange(app.id, e.target.value as ScholarshipApplicant['status'])
-                        }
-                        className={`rounded-xl px-2.5 py-1 text-xs font-bold outline-none cursor-pointer border ${
-                          app.status === 'Approved'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : app.status === 'Shortlisted'
-                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                            : app.status === 'Documents Verified'
-                            ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
-                            : app.status === 'Rejected'
-                            ? 'bg-rose-50 text-rose-700 border-rose-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}
-                      >
-                        <option value="Under Review">Under Review</option>
-                        <option value="Documents Verified">Documents Verified</option>
-                        <option value="Shortlisted">Shortlisted</option>
-                        <option value="Approved">Approved</option>
-                        <option value="Rejected">Rejected</option>
-                      </select>
+                      {user?.role === 'STUDENT' ? (
+                        <span className="rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800">{app.status}</span>
+                      ) : (
+                        <select
+                          value={app.status}
+                          onChange={(e) =>
+                            handleStatusChange(app.id, e.target.value as ScholarshipApplicant['status'])
+                          }
+                          className="cursor-pointer rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800 outline-none"
+                        >
+                          <option value="Under Review">Under Review</option>
+                          <option value="Documents Verified">Documents Verified</option>
+                          <option value="Shortlisted">Shortlisted</option>
+                          <option value="Approved">Approved</option>
+                          <option value="Rejected">Rejected</option>
+                        </select>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1023,6 +1101,37 @@ export const ScholarshipsPage: React.FC = () => {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {showCreateScholarship && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <form onSubmit={handleCreateScholarship} className="max-h-[90vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-3xl border border-blue-100 bg-white p-6 shadow-2xl sm:p-8">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Scholarship management</p>
+              <h2 className="mt-1 text-xl font-extrabold text-slate-900">Create scholarship</h2>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input aria-label="Scholarship name" placeholder="Scholarship name" required value={scholarshipForm.name} onChange={(e) => setScholarshipForm({ ...scholarshipForm, name: e.target.value })} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm focus:border-blue-500 focus:bg-white" />
+              <input aria-label="Provider" placeholder="Provider" required value={scholarshipForm.provider} onChange={(e) => setScholarshipForm({ ...scholarshipForm, provider: e.target.value })} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm focus:border-blue-500 focus:bg-white" />
+              <select aria-label="Category" value={scholarshipForm.category} onChange={(e) => setScholarshipForm({ ...scholarshipForm, category: e.target.value as ScholarshipItem['category'] })} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                {['Merit', 'Government', 'Need-Based', 'Women-STEM', 'Sports', 'Research'].map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+              <input aria-label="Amount" placeholder="Grant amount" value={scholarshipForm.amount} onChange={(e) => setScholarshipForm({ ...scholarshipForm, amount: e.target.value })} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              <input aria-label="Deadline" type="date" value={scholarshipForm.deadline} onChange={(e) => setScholarshipForm({ ...scholarshipForm, deadline: e.target.value })} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              <input aria-label="Total quota" type="number" min="1" value={scholarshipForm.totalQuota} onChange={(e) => setScholarshipForm({ ...scholarshipForm, totalQuota: e.target.value })} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            </div>
+            <textarea aria-label="Eligibility" placeholder="Eligibility criteria" required rows={2} value={scholarshipForm.eligibility} onChange={(e) => setScholarshipForm({ ...scholarshipForm, eligibility: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            <textarea aria-label="Benefits" placeholder="Benefits and award details" rows={2} value={scholarshipForm.benefits} onChange={(e) => setScholarshipForm({ ...scholarshipForm, benefits: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            <textarea aria-label="Required documents" placeholder="Required documents (comma separated)" rows={2} value={scholarshipForm.documents} onChange={(e) => setScholarshipForm({ ...scholarshipForm, documents: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            <textarea aria-label="Description" placeholder="Description" rows={3} value={scholarshipForm.description} onChange={(e) => setScholarshipForm({ ...scholarshipForm, description: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setShowCreateScholarship(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+              <button type="submit" disabled={isCreatingScholarship} className="rounded-xl bg-blue-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-60">
+                {isCreatingScholarship ? 'Publishing...' : 'Publish scholarship'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

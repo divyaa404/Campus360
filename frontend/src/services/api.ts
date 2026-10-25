@@ -1,5 +1,18 @@
 // Campus360 Central API Client
-import { supabase } from '../lib/supabase';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
+
+function throwSupabaseError(error: { message: string } | null): void {
+  if (error) {
+    throw new Error(`Supabase request failed: ${error.message}`);
+  }
+}
+
+async function getAuthUserId(userId: string): Promise<string | null> {
+  if (!isValidUUID(userId)) return null;
+  const { data, error } = await supabase.auth.getSession();
+  throwSupabaseError(error);
+  return data.session?.user.id === userId ? userId : null;
+}
 
 export function isValidUUID(str?: string | null): boolean {
   if (!str) return false;
@@ -822,6 +835,53 @@ export const api = {
     headTitle?: string;
     password?: string;
   }) => {
+    if (isSupabaseConfigured) {
+      const temporaryPassword = data.password || `Pass@${Math.floor(1000 + Math.random() * 9000)}`;
+      const { data: created, error } = await supabase
+        .from('head_credentials')
+        .insert({
+          name: data.name,
+          email: (data.email || '').trim().toLowerCase(),
+          organization: data.organization,
+          head_title: data.headTitle || `${data.organization} Head`,
+          temp_password: temporaryPassword,
+          status: 'Pending First-Time Password Set',
+          must_change_password: true,
+        })
+        .select()
+        .single();
+      throwSupabaseError(error);
+
+      const head: HeadAccount = {
+        id: created.id,
+        name: created.name,
+        email: created.email,
+        organization: created.organization,
+        headTitle: created.head_title,
+        mustChangePassword: created.must_change_password,
+        status: created.status,
+        createdAt: created.created_at,
+        eventsCount: created.events_count || 0,
+        totalRegistrations: created.total_registrations || 0,
+      };
+      const current = getStored<HeadAccount[]>(STORAGE_KEYS.HEADS, []);
+      saveStored(STORAGE_KEYS.HEADS, [head, ...current.filter((item) => item.id !== head.id)]);
+
+      return {
+        message: `Head credentials successfully generated for ${data.organization}!`,
+        credentials: {
+          id: head.id,
+          email: head.email,
+          temporaryPassword,
+          name: head.name,
+          organization: head.organization || data.organization,
+          headTitle: head.headTitle || 'Head',
+          mustChangePassword: true,
+          createdAt: head.createdAt,
+        },
+      };
+    }
+
     try {
       const res = await request<{
         message: string;
@@ -931,27 +991,23 @@ export const api = {
   },
 
   getHeads: async () => {
-    // 1. Try real-time Supabase head_credentials table
-    try {
-      const { data: sbHeads } = await supabase.from('head_credentials').select('*');
-      if (sbHeads && sbHeads.length > 0) {
-        const mapped: HeadAccount[] = sbHeads.map((h: any) => ({
-          id: h.id,
-          name: h.name,
-          email: h.email,
-          organization: h.organization,
-          headTitle: h.head_title,
-          mustChangePassword: h.must_change_password,
-          status: h.status || 'Active',
-          createdAt: h.created_at,
-          eventsCount: h.events_count || 0,
-          totalRegistrations: h.total_registrations || 0,
-        }));
-        saveStored(STORAGE_KEYS.HEADS, mapped);
-        return mapped;
-      }
-    } catch (err) {
-      // Supabase fetch notice
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase.from('head_credentials').select('*').order('created_at', { ascending: false });
+      throwSupabaseError(error);
+      const mapped: HeadAccount[] = (data || []).map((h: any) => ({
+        id: h.id,
+        name: h.name,
+        email: h.email,
+        organization: h.organization,
+        headTitle: h.head_title,
+        mustChangePassword: h.must_change_password,
+        status: h.status || 'Active',
+        createdAt: h.created_at,
+        eventsCount: h.events_count || 0,
+        totalRegistrations: h.total_registrations || 0,
+      }));
+      saveStored(STORAGE_KEYS.HEADS, mapped);
+      return mapped;
     }
 
     // 2. Try backend API
@@ -968,9 +1024,13 @@ export const api = {
   },
 
   deleteHead: async (headId: string) => {
-    try {
-      await supabase.from('head_credentials').delete().eq('id', headId);
-    } catch (e) {}
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from('head_credentials').delete().eq('id', headId);
+      throwSupabaseError(error);
+      const current = getStored<HeadAccount[]>(STORAGE_KEYS.HEADS, []);
+      saveStored(STORAGE_KEYS.HEADS, current.filter((head) => head.id !== headId));
+      return { message: 'Head account removed successfully', headId };
+    }
 
     try {
       await request<{ message: string; headId: string }>(`/admin/heads/${headId}`, {
@@ -987,6 +1047,25 @@ export const api = {
 
   resetHeadPassword: async (headId: string, newPassword?: string) => {
     const tempPass = newPassword || `Pass@${Math.floor(1000 + Math.random() * 9000)}`;
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('head_credentials')
+        .update({
+          temp_password: tempPass,
+          must_change_password: true,
+          status: 'Pending First-Time Password Set',
+        })
+        .eq('id', headId)
+        .select('email')
+        .single();
+      throwSupabaseError(error);
+      if (!data) throw new Error('Head account was not found.');
+      return {
+        message: 'Head password reset successfully.',
+        temporaryPassword: tempPass,
+        email: data.email,
+      };
+    }
     try {
       return await request<{ message: string; temporaryPassword: string; email: string }>('/admin/reset-head-password', {
         method: 'POST',
@@ -1048,36 +1127,32 @@ export const api = {
 
   // ── Events & Rosters (Supabase Connected) ──
   getEvents: async (): Promise<EventItem[]> => {
-    try {
-      const { data: sbEvents } = await supabase
+    if (isSupabaseConfigured) {
+      const { data: sbEvents, error } = await supabase
         .from('events')
         .select('*')
         .order('event_date', { ascending: true });
-
-      if (sbEvents && sbEvents.length > 0) {
-        const mapped: EventItem[] = sbEvents.map((e: any) => ({
-          id: e.id,
-          title: e.title,
-          category: e.category,
-          organizer: e.organizer,
-          organizerRole: e.organizer_role,
-          createdByHeadId: e.created_by_head_id,
-          date: e.event_date,
-          time: e.event_time || '10:00 AM',
-          venue: e.venue || 'Auditorium',
-          desc: e.description || '',
-          image: e.image_url || 'https://images.unsplash.com/photo-1515187029135-18ee286d815b?w=800&auto=format&fit=crop&q=60',
-          deadline: e.deadline || e.event_date,
-          maxCapacity: e.max_capacity || 100,
-          eligibility: e.eligibility || 'Open to all',
-          registeredCount: e.registered_count || 0,
-          createdAt: e.created_at,
-        }));
-        saveStored(STORAGE_KEYS.EVENTS, mapped);
-        return mapped;
-      }
-    } catch (err) {
-      console.warn('Supabase getEvents notice:', err);
+      throwSupabaseError(error);
+      const mapped: EventItem[] = (sbEvents || []).map((e: any) => ({
+        id: e.id,
+        title: e.title,
+        category: e.category,
+        organizer: e.organizer,
+        organizerRole: e.organizer_role,
+        createdByHeadId: e.created_by_head_id,
+        date: e.event_date,
+        time: e.event_time || '10:00 AM',
+        venue: e.venue || 'Auditorium',
+        desc: e.description || '',
+        image: e.image_url || 'https://images.unsplash.com/photo-1515187029135-18ee286d815b?w=800&auto=format&fit=crop&q=60',
+        deadline: e.deadline || e.event_date,
+        maxCapacity: e.max_capacity || 100,
+        eligibility: e.eligibility || 'Open to all',
+        registeredCount: e.registered_count || 0,
+        createdAt: e.created_at || '',
+      }));
+      saveStored(STORAGE_KEYS.EVENTS, mapped);
+      return mapped;
     }
 
     try {
@@ -1114,9 +1189,8 @@ export const api = {
       registeredCount: 0,
     };
 
-    // 1. Live Supabase Insert
-    try {
-      const { data: sbCreated } = await supabase
+    if (isSupabaseConfigured) {
+      const { data: sbCreated, error } = await supabase
         .from('events')
         .insert({
           id: newId,
@@ -1138,12 +1212,12 @@ export const api = {
         })
         .select()
         .single();
-
-      if (sbCreated) {
-        newEvent.id = sbCreated.id;
-      }
-    } catch (e) {
-      console.warn('Supabase postEvent notice:', e);
+      throwSupabaseError(error);
+      newEvent.id = sbCreated.id;
+      newEvent.createdAt = sbCreated.created_at;
+      const current = getStored<EventItem[]>(STORAGE_KEYS.EVENTS, []);
+      saveStored(STORAGE_KEYS.EVENTS, [newEvent, ...current]);
+      return { message: 'Event successfully published!', event: newEvent };
     }
 
     const current = getStored<EventItem[]>(STORAGE_KEYS.EVENTS, SEED_EVENTS);
@@ -1178,14 +1252,26 @@ export const api = {
       status: 'Registered',
     };
 
-    // 1. Live Supabase Insert
-    try {
-      const { data: sbReg } = await supabase
+    if (isSupabaseConfigured) {
+      const authenticatedStudentId = await getAuthUserId(studentData.studentId);
+      const duplicateCheck = supabase
+        .from('event_registrations')
+        .select('id')
+        .eq('event_id', eventId)
+        .eq('student_email', studentData.studentEmail)
+        .limit(1);
+      const { data: existing, error: duplicateError } = await duplicateCheck.maybeSingle();
+      throwSupabaseError(duplicateError);
+      if (existing) {
+        throw new Error('You are already registered for this event.');
+      }
+
+      const { data: sbReg, error } = await supabase
         .from('event_registrations')
         .insert({
           id: newRegId,
           event_id: eventId,
-          student_id: isValidUUID(studentData.studentId) ? studentData.studentId : null,
+          student_id: authenticatedStudentId,
           student_name: studentData.studentName,
           student_email: studentData.studentEmail,
           roll_number: studentData.rollNumber,
@@ -1196,18 +1282,25 @@ export const api = {
         })
         .select()
         .single();
+      throwSupabaseError(error);
+      newReg.id = sbReg.id;
+      newReg.registeredAt = sbReg.registered_at;
 
-      if (sbReg?.id) {
-        newReg.id = sbReg.id;
+      const { count, error: countError } = await supabase
+        .from('event_registrations')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_id', eventId);
+      throwSupabaseError(countError);
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ registered_count: count || 0 })
+        .eq('id', eventId);
+      if (updateError) {
+        console.warn('Unable to refresh the event registration count:', updateError.message);
       }
-
-      // Update registered_count on Supabase event
-      const { data: ev } = await supabase.from('events').select('registered_count').eq('id', eventId).single();
-      if (ev) {
-        await supabase.from('events').update({ registered_count: (ev.registered_count || 0) + 1 }).eq('id', eventId);
-      }
-    } catch (e) {
-      console.warn('Supabase registration notice:', e);
+      const currentRegs = getStored<EventRegistration[]>(STORAGE_KEYS.REGS, []);
+      saveStored(STORAGE_KEYS.REGS, [newReg, ...currentRegs.filter((r) => r.id !== newReg.id)]);
+      return { message: 'Successfully registered for event!', registration: newReg };
     }
 
     const currentRegs = getStored<EventRegistration[]>(STORAGE_KEYS.REGS, SEED_REGISTRATIONS);
@@ -1225,37 +1318,32 @@ export const api = {
   },
 
   getEventRegistrations: async (eventId: string) => {
-    // 1. Try Supabase
-    try {
-      const { data: sbRegs } = await supabase
+    if (isSupabaseConfigured) {
+      const { data: sbRegs, error } = await supabase
         .from('event_registrations')
         .select('*')
         .eq('event_id', eventId);
-
-      if (sbRegs && sbRegs.length > 0) {
-        const events = await api.getEvents();
-        const event = events.find((e) => e.id === eventId) || events[0];
-        const students: EventRegistration[] = sbRegs.map((r: any) => ({
-          id: r.id,
-          eventId: r.event_id,
-          studentId: r.student_id,
-          studentName: r.student_name,
-          studentEmail: r.student_email,
-          rollNumber: r.roll_number,
-          department: r.department,
-          year: r.year,
-          phone: r.phone,
-          registeredAt: r.registered_at,
-          status: r.status,
-        }));
-        return {
-          event,
-          totalApplicants: students.length,
-          students,
-        };
-      }
-    } catch (e) {
-      console.warn('Supabase getEventRegistrations notice:', e);
+      throwSupabaseError(error);
+      const events = await api.getEvents();
+      const event = events.find((e) => e.id === eventId);
+      const students: EventRegistration[] = (sbRegs || []).map((r: any) => ({
+        id: r.id,
+        eventId: r.event_id,
+        studentId: r.student_id,
+        studentName: r.student_name,
+        studentEmail: r.student_email,
+        rollNumber: r.roll_number,
+        department: r.department,
+        year: r.year,
+        phone: r.phone,
+        registeredAt: r.registered_at,
+        status: r.status,
+      }));
+      return {
+        event,
+        totalApplicants: students.length,
+        students,
+      };
     }
 
     const events = getStored<EventItem[]>(STORAGE_KEYS.EVENTS, SEED_EVENTS);
@@ -1270,10 +1358,14 @@ export const api = {
   },
 
   updateRegistrationStatus: async (eventId: string, regId: string, status: EventRegistration['status']) => {
-    try {
-      await supabase.from('event_registrations').update({ status }).eq('id', regId);
-    } catch (e) {
-      console.warn('Supabase status update notice:', e);
+    if (isSupabaseConfigured) {
+      const { error } = await supabase
+        .from('event_registrations')
+        .update({ status })
+        .eq('id', regId)
+        .eq('event_id', eventId);
+      throwSupabaseError(error);
+      return { message: 'Status updated successfully' };
     }
 
     const regs = getStored<EventRegistration[]>(STORAGE_KEYS.REGS, SEED_REGISTRATIONS);
@@ -1285,36 +1377,35 @@ export const api = {
     return { message: 'Status updated successfully', registration: reg! };
   },
 
-  getMyRegistrations: async (studentId: string) => {
-    try {
-      const { data: sbRegs } = await supabase
-        .from('event_registrations')
-        .select('*');
-
-      if (sbRegs && sbRegs.length > 0) {
-        const events = await api.getEvents();
-        const filtered = sbRegs.filter((r: any) => r.student_id === studentId || r.student_email?.includes('@'));
-        return filtered.map((r: any) => ({
-          id: r.id,
-          eventId: r.event_id,
-          studentId: r.student_id,
-          studentName: r.student_name,
-          studentEmail: r.student_email,
-          rollNumber: r.roll_number,
-          department: r.department,
-          year: r.year,
-          phone: r.phone,
-          registeredAt: r.registered_at,
-          status: r.status,
-          event: events.find((e) => e.id === r.event_id),
-        }));
-      }
-    } catch (e) {}
+  getMyRegistrations: async (studentId: string, studentEmail?: string) => {
+    if (isSupabaseConfigured) {
+      let query = supabase.from('event_registrations').select('*');
+      query = studentEmail
+        ? query.eq('student_email', studentEmail)
+        : query.eq('student_id', studentId);
+      const { data: sbRegs, error } = await query;
+      throwSupabaseError(error);
+      const events = await api.getEvents();
+      return (sbRegs || []).map((r: any) => ({
+        id: r.id,
+        eventId: r.event_id,
+        studentId: r.student_id,
+        studentName: r.student_name,
+        studentEmail: r.student_email,
+        rollNumber: r.roll_number,
+        department: r.department,
+        year: r.year,
+        phone: r.phone,
+        registeredAt: r.registered_at,
+        status: r.status,
+        event: events.find((e) => e.id === r.event_id),
+      }));
+    }
 
     const regs = getStored<EventRegistration[]>(STORAGE_KEYS.REGS, SEED_REGISTRATIONS);
     const events = getStored<EventItem[]>(STORAGE_KEYS.EVENTS, SEED_EVENTS);
     return regs
-      .filter((r) => r.studentId === studentId || r.studentEmail === 'student@campus360.edu')
+      .filter((r) => r.studentId === studentId || (studentEmail && r.studentEmail.toLowerCase() === studentEmail.toLowerCase()))
       .map((r) => ({
         ...r,
         event: events.find((e) => e.id === r.eventId),
@@ -1323,34 +1414,83 @@ export const api = {
 
   // ── Scholarships System (Supabase Connected) ──
   getScholarships: async (): Promise<ScholarshipItem[]> => {
-    try {
-      const { data: sbScholarships } = await supabase
+    if (isSupabaseConfigured) {
+      const { data: sbScholarships, error } = await supabase
         .from('scholarships')
         .select('*')
         .order('created_at', { ascending: false });
-
-      if (sbScholarships && sbScholarships.length > 0) {
-        const mapped: ScholarshipItem[] = sbScholarships.map((s: any) => ({
-          id: s.id,
-          name: s.name,
-          provider: s.provider,
-          category: s.category,
-          benefits: s.benefits || '',
-          amount: s.amount || '',
-          eligibility: s.eligibility || '',
-          deadline: s.deadline || '',
-          documents: s.documents ? s.documents.split(', ') : [],
-          totalQuota: s.total_quota || 50,
-          applicantsCount: s.applicants_count || 0,
-          description: s.description || '',
-        }));
-        saveStored(STORAGE_KEYS.SCHOLARSHIPS, mapped);
-        return mapped;
-      }
-    } catch (err) {
-      console.warn('Supabase getScholarships notice:', err);
+      throwSupabaseError(error);
+      const mapped: ScholarshipItem[] = (sbScholarships || []).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        provider: s.provider,
+        category: s.category,
+        benefits: s.benefits || '',
+        amount: s.amount || '',
+        eligibility: s.eligibility || '',
+        deadline: s.deadline || '',
+        documents: Array.isArray(s.documents) ? s.documents.join(', ') : (s.documents || ''),
+        totalQuota: s.total_quota ?? 50,
+        applicantsCount: s.applicants_count ?? 0,
+        description: s.description || '',
+      }));
+      saveStored(STORAGE_KEYS.SCHOLARSHIPS, mapped);
+      return mapped;
     }
     return getStored<ScholarshipItem[]>(STORAGE_KEYS.SCHOLARSHIPS, SEED_SCHOLARSHIPS);
+  },
+
+  createScholarship: async (
+    scholarship: Omit<ScholarshipItem, 'id' | 'applicantsCount'>
+  ): Promise<ScholarshipItem> => {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('scholarships')
+        .insert({
+          name: scholarship.name,
+          provider: scholarship.provider,
+          category: scholarship.category,
+          benefits: scholarship.benefits,
+          amount: scholarship.amount,
+          eligibility: scholarship.eligibility,
+          deadline: scholarship.deadline || null,
+          documents: Array.isArray(scholarship.documents)
+            ? scholarship.documents.join(', ')
+            : scholarship.documents,
+          total_quota: scholarship.totalQuota,
+          applicants_count: 0,
+          description: scholarship.description,
+        })
+        .select()
+        .single();
+      throwSupabaseError(error);
+      const created: ScholarshipItem = {
+        id: data.id,
+        name: data.name,
+        provider: data.provider,
+        category: data.category,
+        benefits: data.benefits || '',
+        amount: data.amount || '',
+        eligibility: data.eligibility || '',
+        deadline: data.deadline || '',
+        documents: data.documents || '',
+        totalQuota: data.total_quota ?? 50,
+        applicantsCount: data.applicants_count ?? 0,
+        description: data.description || '',
+      };
+      const current = getStored<ScholarshipItem[]>(STORAGE_KEYS.SCHOLARSHIPS, []);
+      saveStored(STORAGE_KEYS.SCHOLARSHIPS, [created, ...current]);
+      return created;
+    }
+
+    const created: ScholarshipItem = {
+      ...scholarship,
+      id: generateUUID(),
+      applicantsCount: 0,
+    };
+    const current = getStored<ScholarshipItem[]>(STORAGE_KEYS.SCHOLARSHIPS, SEED_SCHOLARSHIPS);
+    saveStored(STORAGE_KEYS.SCHOLARSHIPS, [created, ...current]);
+    return created;
   },
 
   applyForScholarship: async (application: Omit<ScholarshipApplicant, 'id' | 'appliedDate' | 'status'>) => {
@@ -1362,15 +1502,15 @@ export const api = {
       status: 'Under Review',
     };
 
-    // 1. Live Supabase Insert
-    try {
-      const { data: sbApp } = await supabase
+    if (isSupabaseConfigured) {
+      const authenticatedStudentId = await getAuthUserId(application.studentId);
+      const { data: sbApp, error } = await supabase
         .from('scholarship_applications')
         .insert({
           id: newId,
           scholarship_id: application.scholarshipId,
           scholarship_name: application.scholarshipName,
-          student_id: isValidUUID(application.studentId) ? application.studentId : null,
+          student_id: authenticatedStudentId,
           student_name: application.studentName,
           student_email: application.studentEmail,
           roll_number: application.rollNumber,
@@ -1383,18 +1523,22 @@ export const api = {
         })
         .select()
         .single();
-
-      if (sbApp?.id) {
-        newApp.id = sbApp.id;
+      throwSupabaseError(error);
+      newApp.id = sbApp.id;
+      newApp.appliedDate = sbApp.applied_date;
+      const { count, error: countError } = await supabase
+        .from('scholarship_applications')
+        .select('id', { count: 'exact', head: true })
+        .eq('scholarship_id', application.scholarshipId);
+      throwSupabaseError(countError);
+      const { error: updateError } = await supabase
+        .from('scholarships')
+        .update({ applicants_count: count || 0 })
+        .eq('id', application.scholarshipId);
+      if (updateError) {
+        console.warn('Unable to refresh the scholarship applicant count:', updateError.message);
       }
-
-      // Increment applicants_count on scholarship
-      const { data: sch } = await supabase.from('scholarships').select('applicants_count').eq('id', application.scholarshipId).single();
-      if (sch) {
-        await supabase.from('scholarships').update({ applicants_count: (sch.applicants_count || 0) + 1 }).eq('id', application.scholarshipId);
-      }
-    } catch (e) {
-      console.warn('Supabase applyForScholarship notice:', e);
+      return newApp;
     }
 
     const current = getStored<ScholarshipApplicant[]>(STORAGE_KEYS.SCHOLARSHIP_APPS, SEED_SCHOLARSHIP_APPLICANTS);
@@ -1411,36 +1555,38 @@ export const api = {
     return newApp;
   },
 
-  getScholarshipApplications: async (): Promise<ScholarshipApplicant[]> => {
-    try {
-      const { data: sbApps } = await supabase
+  getScholarshipApplications: async (studentId?: string, studentEmail?: string): Promise<ScholarshipApplicant[]> => {
+    if (isSupabaseConfigured) {
+      let query = supabase
         .from('scholarship_applications')
         .select('*')
         .order('applied_date', { ascending: false });
-
-      if (sbApps && sbApps.length > 0) {
-        const mapped: ScholarshipApplicant[] = sbApps.map((a: any) => ({
-          id: a.id,
-          scholarshipId: a.scholarship_id,
-          scholarshipName: a.scholarship_name,
-          studentId: a.student_id,
-          studentName: a.student_name,
-          studentEmail: a.student_email,
-          rollNumber: a.roll_number,
-          department: a.department,
-          year: a.year,
-          cgpa: a.cgpa,
-          familyIncome: a.family_income,
-          category: a.category,
-          appliedDate: a.applied_date,
-          status: a.status,
-          missingDocuments: a.missing_documents || [],
-        }));
-        saveStored(STORAGE_KEYS.SCHOLARSHIP_APPS, mapped);
-        return mapped;
+      if (studentId) {
+        query = query.eq('student_email', studentEmail || '');
       }
-    } catch (e) {
-      console.warn('Supabase getScholarshipApplications notice:', e);
+      const { data: sbApps, error } = await query;
+      throwSupabaseError(error);
+      const mapped: ScholarshipApplicant[] = (sbApps || []).map((a: any) => ({
+        id: a.id,
+        scholarshipId: a.scholarship_id,
+        scholarshipName: a.scholarship_name || '',
+        studentId: a.student_id || '',
+        studentName: a.student_name,
+        studentEmail: a.student_email,
+        rollNumber: a.roll_number || '',
+        department: a.department || '',
+        year: a.year ?? '',
+        cgpa: a.cgpa ?? '',
+        familyIncome: a.family_income || '',
+        category: a.category || '',
+        appliedDate: a.applied_date,
+        status: a.status,
+        missingDocuments: a.missing_documents || [],
+      }));
+      if (!studentId) {
+        saveStored(STORAGE_KEYS.SCHOLARSHIP_APPS, mapped);
+      }
+      return mapped;
     }
     return getStored<ScholarshipApplicant[]>(STORAGE_KEYS.SCHOLARSHIP_APPS, SEED_SCHOLARSHIP_APPLICANTS);
   },
@@ -1449,10 +1595,32 @@ export const api = {
     appId: string,
     status: ScholarshipApplicant['status']
   ): Promise<ScholarshipApplicant | undefined> => {
-    try {
-      await supabase.from('scholarship_applications').update({ status }).eq('id', appId);
-    } catch (e) {
-      console.warn('Supabase updateScholarshipApplicantStatus notice:', e);
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('scholarship_applications')
+        .update({ status })
+        .eq('id', appId)
+        .select()
+        .maybeSingle();
+      throwSupabaseError(error);
+      if (!data) return undefined;
+      return {
+        id: data.id,
+        scholarshipId: data.scholarship_id,
+        scholarshipName: data.scholarship_name || '',
+        studentId: data.student_id || '',
+        studentName: data.student_name,
+        studentEmail: data.student_email,
+        rollNumber: data.roll_number || '',
+        department: data.department || '',
+        year: data.year ?? '',
+        cgpa: data.cgpa ?? '',
+        familyIncome: data.family_income || '',
+        category: data.category || '',
+        appliedDate: data.applied_date,
+        status: data.status,
+        missingDocuments: data.missing_documents || [],
+      };
     }
 
     const apps = getStored<ScholarshipApplicant[]>(STORAGE_KEYS.SCHOLARSHIP_APPS, SEED_SCHOLARSHIP_APPLICANTS);
@@ -1465,14 +1633,64 @@ export const api = {
   },
 
   getMissingStudents: async (): Promise<MissingStudentAlert[]> => {
+    if (isSupabaseConfigured) return [];
     return SEED_MISSING_STUDENTS;
   },
 
   getScholarshipNotices: async (): Promise<ScholarshipNotice[]> => {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('notices')
+        .select('*')
+        .order('created_at', { ascending: false });
+      throwSupabaseError(error);
+      return (data || [])
+        .filter((notice: any) =>
+          `${notice.category || ''} ${notice.source || ''} ${notice.title || ''}`.toLowerCase().includes('scholarship')
+        )
+        .map((notice: any) => ({
+          id: notice.id,
+          title: notice.title,
+          source: notice.source || 'Scholarship Office',
+          category: notice.category || 'Scholarship',
+          priority: notice.is_important ? 'High' : 'General',
+          date: notice.created_at?.split('T')[0] || '',
+          desc: notice.description || '',
+          attachment: notice.attachment_url || undefined,
+        }));
+    }
     return getStored<ScholarshipNotice[]>(STORAGE_KEYS.SCHOLARSHIP_NOTICES, SEED_SCHOLARSHIP_NOTICES);
   },
 
   postScholarshipNotice: async (notice: Omit<ScholarshipNotice, 'id' | 'date'>): Promise<ScholarshipNotice> => {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('notices')
+        .insert({
+          title: notice.title,
+          category: notice.category,
+          description: notice.deadline
+            ? `${notice.desc}\n\nSubmission deadline: ${notice.deadline}`
+            : notice.desc,
+          source: notice.source,
+          is_important: notice.priority === 'Urgent' || notice.priority === 'High',
+          attachment_url: notice.attachment || null,
+        })
+        .select()
+        .single();
+      throwSupabaseError(error);
+      return {
+        id: data.id,
+        title: data.title,
+        source: data.source || notice.source,
+        category: data.category,
+        priority: notice.priority,
+        date: data.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+        desc: data.description || '',
+        deadline: notice.deadline,
+        attachment: data.attachment_url || undefined,
+      };
+    }
     const newNotice: ScholarshipNotice = {
       ...notice,
       id: generateUUID(),
@@ -1485,28 +1703,23 @@ export const api = {
 
   // ── Notices System (Supabase Connected) ──
   getNotices: async (): Promise<NoticeItem[]> => {
-    try {
-      const { data: sbNotices } = await supabase
+    if (isSupabaseConfigured) {
+      const { data: sbNotices, error } = await supabase
         .from('notices')
         .select('*')
         .order('created_at', { ascending: false });
-
-      if (sbNotices && sbNotices.length > 0) {
-        const mapped: NoticeItem[] = sbNotices.map((n: any) => ({
-          id: n.id,
-          title: n.title,
-          source: n.source || 'College Admin',
-          category: n.category || 'General',
-          desc: n.description || '',
-          date: n.created_at ? n.created_at.split('T')[0] : 'Today',
-          isImportant: n.is_important || false,
-          attachment: n.attachment_url,
-          createdAt: n.created_at,
-        }));
-        return mapped;
-      }
-    } catch (err) {
-      console.warn('Supabase getNotices notice:', err);
+      throwSupabaseError(error);
+      return (sbNotices || []).map((n: any) => ({
+        id: n.id,
+        title: n.title,
+        source: n.source || 'College Admin',
+        category: n.category || 'General',
+        desc: n.description || '',
+        date: n.created_at ? n.created_at.split('T')[0] : '',
+        isImportant: n.is_important || false,
+        attachment: n.attachment_url,
+        createdAt: n.created_at,
+      }));
     }
 
     return [
@@ -1564,8 +1777,8 @@ export const api = {
       date: new Date().toISOString().split('T')[0],
     };
 
-    try {
-      const { data: sbNotice } = await supabase
+    if (isSupabaseConfigured) {
+      const { data: sbNotice, error } = await supabase
         .from('notices')
         .insert({
           id: newId,
@@ -1578,58 +1791,51 @@ export const api = {
         })
         .select()
         .single();
-
-      if (sbNotice?.id) {
-        createdNotice.id = sbNotice.id;
-      }
-    } catch (e) {
-      console.warn('Supabase postNotice notice:', e);
+      throwSupabaseError(error);
+      createdNotice.id = sbNotice.id;
+      createdNotice.createdAt = sbNotice.created_at;
+      createdNotice.date = sbNotice.created_at?.split('T')[0] || createdNotice.date;
     }
 
     return createdNotice;
   },
 
   deleteNotice: async (noticeId: string) => {
-    try {
-      await supabase.from('notices').delete().eq('id', noticeId);
-    } catch (e) {
-      console.warn('Supabase deleteNotice notice:', e);
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from('notices').delete().eq('id', noticeId);
+      throwSupabaseError(error);
     }
     return { success: true, noticeId };
   },
 
   // ── Winners & Achievements (Supabase Connected) ──
   getWinners: async (): Promise<WinnerItem[]> => {
-    try {
-      const { data: sbWinners } = await supabase
+    if (isSupabaseConfigured) {
+      const { data: sbWinners, error } = await supabase
         .from('winners')
         .select('*')
         .order('achievement_date', { ascending: false });
-
-      if (sbWinners && sbWinners.length > 0) {
-        const mapped: WinnerItem[] = sbWinners.map((w: any) => ({
-          id: w.id,
-          studentName: w.student_name,
-          rollNumber: w.roll_number,
-          dept: w.dept,
-          year: w.year,
-          title: w.title,
-          competition: w.competition,
-          organizer: w.organizer,
-          category: w.category as any,
-          position: w.position,
-          prize: w.prize,
-          date: w.achievement_date || 'Today',
-          desc: w.description || '',
-          image: w.image_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60',
-          teamMembers: w.team_members || [],
-          certificateUrl: w.certificate_url,
-        }));
-        saveStored(STORAGE_KEYS.WINNERS, mapped);
-        return mapped;
-      }
-    } catch (err) {
-      console.warn('Supabase getWinners notice:', err);
+      throwSupabaseError(error);
+      const mapped: WinnerItem[] = (sbWinners || []).map((w: any) => ({
+        id: w.id,
+        studentName: w.student_name,
+        rollNumber: w.roll_number || '',
+        dept: w.dept || '',
+        year: w.year || '',
+        title: w.title,
+        competition: w.competition,
+        organizer: w.organizer || '',
+        category: w.category || 'Academics',
+        position: w.position || 'Finalist',
+        prize: w.prize || '',
+        date: w.achievement_date || '',
+        desc: w.description || '',
+        image: w.image_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60',
+        teamMembers: w.team_members || [],
+        certificateUrl: w.certificate_url,
+      }));
+      saveStored(STORAGE_KEYS.WINNERS, mapped);
+      return mapped;
     }
     return getStored<WinnerItem[]>(STORAGE_KEYS.WINNERS, SEED_WINNERS);
   },
@@ -1642,8 +1848,8 @@ export const api = {
       date: 'Today',
     };
 
-    try {
-      const { data: sbWin } = await supabase
+    if (isSupabaseConfigured) {
+      const { data: sbWin, error } = await supabase
         .from('winners')
         .insert({
           id: newId,
@@ -1664,12 +1870,12 @@ export const api = {
         })
         .select()
         .single();
-
-      if (sbWin?.id) {
-        newWinner.id = sbWin.id;
-      }
-    } catch (e) {
-      console.warn('Supabase addWinner notice:', e);
+      throwSupabaseError(error);
+      newWinner.id = sbWin.id;
+      newWinner.date = sbWin.achievement_date || '';
+      const current = getStored<WinnerItem[]>(STORAGE_KEYS.WINNERS, []);
+      saveStored(STORAGE_KEYS.WINNERS, [newWinner, ...current]);
+      return newWinner;
     }
 
     const current = getStored<WinnerItem[]>(STORAGE_KEYS.WINNERS, SEED_WINNERS);

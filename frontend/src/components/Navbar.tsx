@@ -153,7 +153,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick, searchTerm, onSearc
             to={user.role === 'SUPER_ADMIN' ? '/admin/settings' : user.role === 'HEAD' ? '/settings' : '/profile'}
             className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-slate-50 p-1.5 pr-3 hover:bg-slate-100 transition-colors"
           >
-            <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-brand-orange to-brand-pink flex items-center justify-center text-white text-sm font-bold">
+            <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-blue-600 to-blue-800 flex items-center justify-center text-white text-sm font-bold">
               {user.name.charAt(0)}
             </div>
             <div className="hidden text-left md:block">

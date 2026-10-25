@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { api, type EventItem } from '../services/api';
+import { api, type EventItem, type NoticeItem } from '../services/api';
 import { 
   Megaphone, 
   Briefcase, 
@@ -18,19 +18,24 @@ import {
 export const StudentDashboard: React.FC = () => {
   const { user } = useAuth();
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [latestNotices, setLatestNotices] = useState<NoticeItem[]>([]);
   const [myRegisteredEventIds, setMyRegisteredEventIds] = useState<string[]>([]);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     const fetchLiveEvents = async () => {
       try {
-        const evts = await api.getEvents();
+        setLoadError('');
+        const [evts, notices] = await Promise.all([api.getEvents(), api.getNotices()]);
         setEvents(evts);
+        setLatestNotices(notices.slice(0, 3));
         if (user?.id) {
-          const regs = await api.getMyRegistrations(user.id);
+          const regs = await api.getMyRegistrations(user.id, user.email);
           setMyRegisteredEventIds(regs.map((r) => r.eventId));
         }
       } catch (err) {
         console.error('Failed to load events for student dashboard:', err);
+        setLoadError(err instanceof Error ? err.message : 'Unable to load dashboard data.');
       }
     };
     fetchLiveEvents();
@@ -38,43 +43,11 @@ export const StudentDashboard: React.FC = () => {
 
   // Realistic mock data
   const stats = [
-    { name: 'New Notices', count: 5, color: 'text-brand-orange bg-brand-orange/10', icon: Megaphone },
+    { name: 'New Notices', count: latestNotices.length, color: 'text-brand-orange bg-brand-orange/10', icon: Megaphone },
     { name: 'Opportunities', count: 18, color: 'text-brand-blue bg-brand-blue/10', icon: Briefcase },
-    { name: 'Upcoming Events', count: events.length || 4, color: 'text-brand-green bg-brand-green/10', icon: Calendar },
+    { name: 'Upcoming Events', count: events.length, color: 'text-brand-green bg-brand-green/10', icon: Calendar },
     { name: 'Mock Exams Completed', count: 12, color: 'text-brand-cyan bg-brand-cyan/10', icon: CheckSquare },
     { name: 'Bookmarks Saved', count: 8, color: 'text-brand-pink bg-brand-pink/10', icon: Bookmark },
-  ];
-
-  const latestNotices = [
-    {
-      id: 'n-1',
-      title: 'T&P Placement Drive: Google India recruitment cycle open',
-      source: 'T&P Cell',
-      category: 'Placement',
-      date: 'Aug 30, 2026',
-      desc: 'Applications are invited from 2027 batch CSE/IT students for Software Engineering internship role. Package details and links attached.',
-      isImportant: true,
-      attachment: 'google_jd_2027.pdf'
-    },
-    {
-      id: 'n-2',
-      title: 'R&D Cell: Project Expo Registration deadline extended',
-      source: 'R&D Cell',
-      category: 'Research',
-      date: 'Aug 29, 2026',
-      desc: 'Annual technical project competition registration has been extended. Submit project abstract to head cell directly.',
-      isImportant: false,
-    },
-    {
-      id: 'n-3',
-      title: 'Mid-Sem Examination Schedule Fall Semester',
-      source: 'Academic Admin',
-      category: 'College',
-      date: 'Aug 28, 2026',
-      desc: 'Mid semester exams will commence from September 18. Detailed date sheet is now available for download.',
-      isImportant: true,
-      attachment: 'datesheet_midsem_2026.pdf'
-    }
   ];
 
   const recommendedOpportunities = [
@@ -104,29 +77,13 @@ export const StudentDashboard: React.FC = () => {
     }
   ];
 
-  const upcomingEvents = [
-    {
-      id: 'e-1',
-      name: 'Annual Sports Meet 2026',
-      date: 'Sept 15, 2026',
-      time: '09:00 AM',
-      venue: 'Main Sports Complex',
-      organizer: 'Sports Committee',
-      status: 'Open'
-    },
-    {
-      id: 'e-2',
-      name: 'Web Dev Mastery Workshop',
-      date: 'Sept 20, 2026',
-      time: '02:00 PM',
-      venue: 'Seminar Hall 3',
-      organizer: 'Coding Club',
-      status: 'Registered'
-    }
-  ];
-
   return (
     <div className="space-y-8">
+      {loadError && (
+        <div role="alert" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+          {loadError}
+        </div>
+      )}
       {/* Dashboard Hero Banner */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-brand-orange via-brand-pink to-brand-purple p-8 text-white shadow-lg">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
