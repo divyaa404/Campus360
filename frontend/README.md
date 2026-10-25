@@ -1,6 +1,9 @@
 # Campus360 Frontend
 
-## Supabase setup
+For the full product overview, feature status, architecture, local setup, Supabase
+instructions, routes, and production limitations, see the [project README](../README.md).
+
+## Frontend-specific Supabase configuration
 
 Create `frontend/.env` with the Supabase project URL and public anon key:
 
@@ -18,13 +21,22 @@ Do not put a Supabase service-role key in frontend environment variables. The fr
 - `head_credentials` for head accounts and temporary credentials
 - `profiles` and `admins` for account profiles
 
-Apply `backend/schema.sql` in the Supabase SQL Editor to create the tables. For an existing project, also run `backend/supabase_content_policies.sql` to enable the policies used by event, notice, scholarship, and achievement operations. The frontend reports Supabase query errors in the relevant page; when Supabase is configured, empty tables display as empty instead of falling back to sample records.
+For a fresh development project, run `backend/supabase_login_schema.sql` in the
+Supabase SQL Editor, then run `backend/supabase_content_policies.sql` for content
+policies and the achievement photo bucket. `backend/schema.sql` is an earlier
+schema variant; see the [project README](../README.md#supabase-setup) before
+choosing scripts for an existing database.
 
-The app currently uses its own login and sends browser requests with the public Supabase anon key. The included policies therefore permit anon writes to these content tables and achievement photo uploads; anyone who obtains the public anon key can write to them. For production, move admin writes behind Supabase-authenticated role policies or a trusted backend before relying on these policies for access control. Achievement photos are limited to common image formats and 5 MB; the resulting public URL is saved in `winners.image_url`.
+The frontend reports Supabase query errors in the relevant page. When Supabase
+is configured, empty tables display as empty instead of falling back to sample
+records.
+
+The current starter policies allow broad anon access for prototype flows and are not production access control. Anyone with the public anon key can access operations permitted by those policies. Replace them with restrictive Supabase-authenticated role policies or move privileged writes behind a trusted backend before production use. Achievement photos are limited to supported image formats and 5 MB; the resulting public URL is saved in `winners.image_url`.
 
 ## Run locally
 
 ```sh
+cd frontend
 npm install
 npm run dev
 ```
