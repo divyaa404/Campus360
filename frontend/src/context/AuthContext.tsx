@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import type { UserRole, User } from '../services/api';
+import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
 
 export type { UserRole, User };
 
@@ -96,32 +97,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Initial Session Load
+    const syncUserFromSession = async (sessionUser: SupabaseAuthUser) => {
+      const email = sessionUser.email;
+      if (!email) throw new Error('Google did not return an email address.');
+
+      const { data: adminRec, error: adminError } = await supabase
+        .from('admins')
+        .select('*')
+        .eq('email', email.toLowerCase())
+        .maybeSingle();
+      if (adminError) throw new Error(`Unable to load administrator profile: ${adminError.message}`);
+
+      let appUser: User;
+      if (adminRec) {
+        appUser = {
+          id: adminRec.id,
+          email: adminRec.email,
+          role: 'SUPER_ADMIN',
+          name: adminRec.name,
+          phone: adminRec.phone,
+          organization: adminRec.organization,
+          headTitle: adminRec.head_title,
+          mustChangePassword: false,
+        };
+      } else {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sessionUser.id)
+          .maybeSingle();
+        if (profileError) throw new Error(`Unable to load student profile: ${profileError.message}`);
+        appUser = mapSupabaseUser(sessionUser, profile);
+      }
+
+      setUser(appUser);
+      localStorage.setItem(USER_SESSION_KEY, JSON.stringify(appUser));
+    };
+
     const init = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
         if (session?.user) {
-          // Check admins table first; fall back to profiles
-          const { data: adminRec } = await supabase.from('admins').select('*').eq('email', session.user.email!).maybeSingle();
-          if (adminRec) {
-            const adminUser: User = {
-              id: adminRec.id,
-              email: adminRec.email,
-              role: 'SUPER_ADMIN',
-              name: adminRec.name,
-              phone: adminRec.phone,
-              organization: adminRec.organization,
-              headTitle: adminRec.head_title,
-              mustChangePassword: false,
-            };
-            setUser(adminUser);
-            localStorage.setItem(USER_SESSION_KEY, JSON.stringify(adminUser));
-          } else {
-            const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
-            const mapped = mapSupabaseUser(session.user, profile);
-            setUser(mapped);
-            localStorage.setItem(USER_SESSION_KEY, JSON.stringify(mapped));
-          }
+          await syncUserFromSession(session.user);
         } else {
           const stored = localStorage.getItem(USER_SESSION_KEY);
           if (stored) {
@@ -133,6 +151,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       } catch (err) {
+        console.error('Failed to restore Campus360 session:', err);
         const stored = localStorage.getItem(USER_SESSION_KEY);
         if (stored) {
           try { setUser(JSON.parse(stored)); } catch {}
@@ -143,29 +162,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     init();
 
-    // 2. Real-time Supabase Auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
-        const { data: adminRec } = await supabase.from('admins').select('*').eq('email', session.user.email!).maybeSingle();
-        if (adminRec) {
-          const adminUser: User = {
-            id: adminRec.id,
-            email: adminRec.email,
-            role: 'SUPER_ADMIN',
-            name: adminRec.name,
-            phone: adminRec.phone,
-            organization: adminRec.organization,
-            headTitle: adminRec.head_title,
-            mustChangePassword: false,
-          };
-          setUser(adminUser);
-          localStorage.setItem(USER_SESSION_KEY, JSON.stringify(adminUser));
-        } else {
-          const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
-          const mapped = mapSupabaseUser(session.user, profile);
-          setUser(mapped);
-          localStorage.setItem(USER_SESSION_KEY, JSON.stringify(mapped));
-        }
+        window.setTimeout(() => {
+          void syncUserFromSession(session.user).catch((err: unknown) => {
+            console.error('Failed to sync signed-in Campus360 user:', err);
+          });
+        }, 0);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        localStorage.removeItem(USER_SESSION_KEY);
       }
     });
 

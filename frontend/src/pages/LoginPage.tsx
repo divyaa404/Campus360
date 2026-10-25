@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -20,11 +20,11 @@ import {
   Sparkles,
   ChevronLeft,
   User,
-  X,
   BookOpen,
   Calendar,
   Layers,
 } from 'lucide-react';
+import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
 
 type LoginStep =
   | 'role-select'
@@ -34,7 +34,7 @@ type LoginStep =
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { login, loginWithGoogle, setupUserAccount, completePasswordChange } = useAuth();
+  const { login, loginWithGoogle, setupUserAccount, completePasswordChange, logout } = useAuth();
 
   const [step, setStep] = useState<LoginStep>('role-select');
   const [selectedRole, setSelectedRole] = useState<UserRole>('STUDENT');
@@ -42,12 +42,10 @@ export const LoginPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   // Google OAuth / Account state
-  const [googleEmail, setGoogleEmail] = useState('divyagsharma1415@gmail.com');
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
+  const [googleEmail, setGoogleEmail] = useState('');
 
   // Setup fields after Google Login (Full Name, Phone Number, Department, Year, Semester, Password)
-  const [fullName, setFullName] = useState('Divya Sharma');
+  const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [department, setDepartment] = useState('Computer Science & Engineering');
   const [year, setYear] = useState('3');
@@ -74,17 +72,20 @@ export const LoginPage: React.FC = () => {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
+  const processedOAuthUserId = useRef<string | null>(null);
+  const authActions = useRef({ login, logout });
+
+  useEffect(() => {
+    authActions.current = { login, logout };
+  }, [login, logout]);
 
   // Check if user just returned from real Google OAuth redirect
   useEffect(() => {
-    // Restore selected role if saved before OAuth redirect
-    const savedRole = localStorage.getItem('campus360_login_role') as UserRole | null;
-    if (savedRole) {
-      setSelectedRole(savedRole);
-    }
-
-    const processSessionUser = async (sessionUser: any) => {
+    const processSessionUser = async (sessionUser: SupabaseAuthUser) => {
       if (!sessionUser) return;
+      if (processedOAuthUserId.current === sessionUser.id) return;
+      processedOAuthUserId.current = sessionUser.id;
+
       const userEmail = sessionUser.email || '';
       const userName =
         sessionUser.user_metadata?.full_name ||
@@ -94,66 +95,96 @@ export const LoginPage: React.FC = () => {
 
       setGoogleEmail(userEmail);
       if (userName) setFullName(userName);
-
-      // Read the intended role directly from localStorage (NOT from profile.role, which
-      // could be 'STUDENT' due to the Supabase trigger creating a profiles row automatically)
-      const intendedRole = (localStorage.getItem('campus360_login_role') as UserRole | null) || 'STUDENT';
+      const savedRole = localStorage.getItem('campus360_login_role');
+      const intendedRole: UserRole = savedRole === 'SUPER_ADMIN' ? 'SUPER_ADMIN' : 'STUDENT';
       setSelectedRole(intendedRole);
+      setIsLoading(true);
 
       try {
         if (intendedRole === 'SUPER_ADMIN') {
-          // ── Admin: check the `admins` table only ──
-          const { data: adminRec } = await supabase
+          const { data: adminRec, error: adminError } = await supabase
             .from('admins')
             .select('*')
             .eq('email', userEmail.toLowerCase())
             .maybeSingle();
+          if (adminError) throw new Error(`Unable to verify administrator access: ${adminError.message}`);
+          if (!adminRec) {
+            await authActions.current.logout();
+            setError('This Google account is not registered as a Super Admin. Choose the Student role or contact your administrator.');
+            setStep('google-continue');
+            return;
+          }
+
           if (adminRec) {
             if (adminRec.name) setFullName(adminRec.name);
             if (adminRec.phone) setPhoneNumber(adminRec.phone);
           }
+          if (adminRec.name?.trim() && adminRec.phone?.replace(/\D/g, '').length >= 10) {
+            navigate('/admin/dashboard', { replace: true });
+            return;
+          }
         } else {
-          // ── Student: check the `profiles` table ──
-          const { data: profile } = await supabase
+          const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('*')
             .eq('email', userEmail.toLowerCase())
             .maybeSingle();
+          if (profileError) throw new Error(`Unable to load your student profile: ${profileError.message}`);
           if (profile) {
             if (profile.name) setFullName(profile.name);
             if (profile.phone) setPhoneNumber(profile.phone);
             if (profile.department) setDepartment(profile.department);
             if (profile.year) setYear(String(profile.year));
             if (profile.semester) setSemester(String(profile.semester));
-            // Do NOT call setSelectedRole here — intendedRole is already set above
+            if (
+              profile.phone?.replace(/\D/g, '').length >= 10 &&
+              profile.department &&
+              profile.year &&
+              profile.semester
+            ) {
+              await authActions.current.login('STUDENT', userEmail);
+              navigate('/dashboard', { replace: true });
+              return;
+            }
           }
         }
+        setStep('user-setup');
       } catch (err) {
-        console.warn('OAuth profile check:', err);
+        processedOAuthUserId.current = null;
+        console.error('Failed to finish Google sign-in:', err);
+        setError(err instanceof Error ? err.message : 'Unable to finish Google sign-in. Please try again.');
+        setStep('google-continue');
+      } finally {
+        setIsLoading(false);
       }
-
-      // Move to setup step to collect remaining details
-      setStep('user-setup');
     };
 
-    // Check existing session on load
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        processSessionUser(session.user);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        window.setTimeout(() => {
+          void processSessionUser(session.user);
+        }, 0);
+      } else if (event === 'SIGNED_OUT') {
+        processedOAuthUserId.current = null;
       }
     });
 
-    // Listen to real-time auth state change (crucial when returning from Google redirect)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        processSessionUser(session.user);
+    void supabase.auth.getSession().then(({ data: { session }, error: sessionError }) => {
+      if (sessionError) throw sessionError;
+      if (session?.user) {
+        window.setTimeout(() => {
+          void processSessionUser(session.user);
+        }, 0);
       }
+    }).catch((err: unknown) => {
+      console.error('Unable to restore Google sign-in:', err);
+      setError(err instanceof Error ? err.message : 'Unable to restore your sign-in session.');
     });
 
     return () => {
       subscription?.unsubscribe();
     };
-  }, []);
+  }, [navigate]);
 
   // Handle role selection
   const handleRoleSelect = (role: UserRole) => {
@@ -179,70 +210,10 @@ export const LoginPage: React.FC = () => {
     localStorage.setItem('campus360_login_role', selectedRole);
     try {
       await loginWithGoogle();
-    } catch (err: any) {
-      console.warn('Google OAuth direct redirect:', err);
+    } catch (err) {
+      console.error('Google OAuth redirect failed:', err);
       setIsLoading(false);
-      // Fallback: If browser popup blocked or network issue, open account modal
-      setShowGoogleModal(true);
-    }
-  };
-
-  // Handle selecting or entering a Google Account in the modal
-  const handleSelectGoogleAccount = async (email: string, defaultName?: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-    setGoogleEmail(cleanEmail);
-    if (defaultName) {
-      setFullName(defaultName);
-    } else if (!fullName) {
-      setFullName(cleanEmail.split('@')[0]);
-    }
-
-    // selectedRole here is the role the user chose on the role-select screen — preserve it
-    try {
-      if (selectedRole === 'SUPER_ADMIN') {
-        // Admin: only read from admins table
-        const { data: adminRec } = await supabase
-          .from('admins')
-          .select('*')
-          .eq('email', cleanEmail)
-          .maybeSingle();
-        if (adminRec) {
-          if (adminRec.name) setFullName(adminRec.name);
-          if (adminRec.phone) setPhoneNumber(adminRec.phone);
-        }
-      } else {
-        // Student: only read from profiles table
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('email', cleanEmail)
-          .maybeSingle();
-        if (profile) {
-          if (profile.name) setFullName(profile.name);
-          if (profile.phone) setPhoneNumber(profile.phone);
-          if (profile.department) setDepartment(profile.department);
-          if (profile.year) setYear(String(profile.year));
-          if (profile.semester) setSemester(String(profile.semester));
-          // Do NOT call setSelectedRole — the user already chose their role
-        }
-      }
-    } catch (e) {}
-
-    setShowGoogleModal(false);
-    setStep('user-setup');
-    setError('');
-  };
-
-  // Handle browser OAuth redirect attempt
-  const handleBrowserOAuth = async () => {
-    setError('');
-    setIsLoading(true);
-    localStorage.setItem('campus360_login_role', selectedRole);
-    try {
-      await loginWithGoogle();
-    } catch (err: any) {
-      setIsLoading(false);
-      setError(err.message || 'Google OAuth redirect failed. Please choose your Google account below.');
+      setError(err instanceof Error ? err.message : 'Google sign-in could not start. Please try again.');
     }
   };
 
@@ -533,42 +504,6 @@ export const LoginPage: React.FC = () => {
               )}
             </button>
 
-            {/* Instant Google One-Tap Card (Bypasses Google Cloud Console redirect_uri_mismatch) */}
-            <div className="rounded-2xl border border-orange-200 bg-orange-50/50 p-3.5 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  Instant Google Sign-In
-                </span>
-                <span className="text-[10px] font-bold text-brand-orange bg-white px-2 py-0.5 rounded-full border border-orange-200">
-                  Verified
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleSelectGoogleAccount('divyagsharma1415@gmail.com', 'Divya Sharma')}
-                className="w-full flex items-center justify-between rounded-xl bg-white p-2.5 text-left border border-orange-200 hover:border-brand-orange hover:shadow-xs transition-all group"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-tr from-brand-orange to-brand-pink text-white font-bold text-xs shrink-0">
-                    DS
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-bold text-xs text-slate-800 group-hover:text-brand-orange transition-colors">Divya Sharma</p>
-                    <p className="text-[11px] text-slate-400 truncate">divyagsharma1415@gmail.com</p>
-                  </div>
-                </div>
-                <span className="text-[11px] font-bold text-brand-orange shrink-0">Sign in →</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowGoogleModal(true)}
-                className="w-full text-center text-[11px] text-slate-500 hover:text-slate-700 font-semibold underline pt-1 block"
-              >
-                Choose another Google / Gmail account
-              </button>
-            </div>
           </div>
 
           {/* Fallback Direct Password Login toggle */}
@@ -659,11 +594,8 @@ export const LoginPage: React.FC = () => {
             </div>
             <button
               type="button"
-              onClick={() => setShowGoogleModal(true)}
-              className="text-[11px] font-bold text-slate-500 hover:text-slate-800 underline shrink-0 ml-2"
-            >
-              Change
-            </button>
+              className="hidden"
+            />
           </div>
 
           <div className="text-center space-y-1">
@@ -1008,116 +940,6 @@ export const LoginPage: React.FC = () => {
                   <p className="text-[10px] text-slate-500 font-medium truncate">{demo.email}</p>
                 </button>
               ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ====== GOOGLE ACCOUNT CHOOSER MODAL ====== */}
-      {showGoogleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                </svg>
-                <h3 className="text-lg font-bold text-slate-900">Sign in with Google</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowGoogleModal(false)}
-                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-500">
-              Choose an account to continue to Campus360 as <span className="font-bold text-slate-800">{selectedRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Student'}</span>:
-            </p>
-
-            <div className="space-y-2">
-              {/* Primary User Account */}
-              <button
-                type="button"
-                onClick={() => handleSelectGoogleAccount('divyagsharma1415@gmail.com', 'Divya Sharma')}
-                className="w-full flex items-center justify-between rounded-2xl border-2 border-orange-200 bg-orange-50/40 p-3.5 text-left hover:border-brand-orange hover:bg-orange-50 transition-all group shadow-xs"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-brand-orange to-brand-pink text-white font-bold text-sm shadow-xs shrink-0">
-                    DS
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-bold text-slate-900 text-sm group-hover:text-brand-orange transition-colors">Divya Sharma</p>
-                    <p className="text-xs text-slate-500 truncate">divyagsharma1415@gmail.com</p>
-                  </div>
-                </div>
-                <div className="rounded-xl bg-white px-2.5 py-1 text-[11px] font-bold text-brand-orange border border-orange-200 shrink-0">
-                  Select →
-                </div>
-              </button>
-
-              {/* Demo Accounts */}
-              {[
-                { name: selectedRole === 'SUPER_ADMIN' ? 'Dr. Sarah Jenkins' : 'Aarav Sharma', email: selectedRole === 'SUPER_ADMIN' ? 'admin@campus360.edu' : 'student@campus360.edu', avatar: selectedRole === 'SUPER_ADMIN' ? 'SJ' : 'AS' }
-              ].map((acc) => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  onClick={() => handleSelectGoogleAccount(acc.email, acc.name)}
-                  className="w-full flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 text-left hover:border-slate-300 hover:bg-slate-50 transition-all group"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 font-bold text-xs shrink-0">
-                      {acc.avatar}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-bold text-slate-800 text-xs truncate">{acc.name}</p>
-                      <p className="text-[11px] text-slate-400 truncate">{acc.email}</p>
-                    </div>
-                  </div>
-                  <ArrowRight className="h-4 w-4 text-slate-400 group-hover:text-slate-700 shrink-0" />
-                </button>
-              ))}
-            </div>
-
-            {/* Custom Google Account input */}
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2.5">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
-                Or enter another Google / Gmail address:
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  placeholder="yourname@gmail.com"
-                  value={customGoogleEmail}
-                  onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                  className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-brand-orange"
-                />
-                <button
-                  type="button"
-                  disabled={!customGoogleEmail.trim() || !customGoogleEmail.includes('@')}
-                  onClick={() => handleSelectGoogleAccount(customGoogleEmail.trim())}
-                  className="rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-slate-800 transition-all disabled:opacity-40 shrink-0"
-                >
-                  Continue
-                </button>
-              </div>
-            </div>
-
-            {/* Browser Redirect Option */}
-            <div className="text-center pt-1">
-              <button
-                type="button"
-                onClick={handleBrowserOAuth}
-                className="text-[11px] text-slate-400 hover:text-slate-600 underline font-medium"
-              >
-                Or try browser redirect to Google OAuth
-              </button>
             </div>
           </div>
         </div>
