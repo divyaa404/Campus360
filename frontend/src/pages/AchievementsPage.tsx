@@ -16,7 +16,8 @@ import {
   Filter,
   Check,
   Building2,
-  GraduationCap
+  GraduationCap,
+  Trash2
 } from 'lucide-react';
 
 export const AchievementsPage: React.FC = () => {
@@ -30,6 +31,7 @@ export const AchievementsPage: React.FC = () => {
   // Submit Winner Modal
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [successToast, setSuccessToast] = useState('');
 
   const [winnerForm, setWinnerForm] = useState({
@@ -129,6 +131,38 @@ export const AchievementsPage: React.FC = () => {
       setLoadError(err instanceof Error ? err.message : 'Unable to save the achievement.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingPhoto(true);
+    setLoadError('');
+    try {
+      const image = await api.uploadAchievementPhoto(file);
+      setWinnerForm((current) => ({ ...current, image }));
+    } catch (err) {
+      console.error('Failed to upload achievement photo:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to upload the achievement photo.');
+    } finally {
+      setIsUploadingPhoto(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleDeleteWinner = async (winner: WinnerItem) => {
+    if (!window.confirm(`Delete achievement "${winner.title}" for ${winner.studentName}?`)) return;
+    setLoadError('');
+    try {
+      await api.deleteWinner(winner.id);
+      setWinners((current) => current.filter((item) => item.id !== winner.id));
+      setSuccessToast(`Achievement "${winner.title}" deleted.`);
+      setTimeout(() => setSuccessToast(''), 4000);
+    } catch (err) {
+      console.error('Failed to delete achievement:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to delete achievement.');
     }
   };
 
@@ -375,15 +409,27 @@ export const AchievementsPage: React.FC = () => {
               </div>
 
               {/* Card Footer */}
-              <div className="px-6 pb-6 pt-0 flex items-center justify-between text-xs text-slate-400 border-t border-slate-100 pt-3">
+              <div className="px-6 pb-6 pt-0 flex items-center justify-between gap-2 text-xs text-slate-400 border-t border-slate-100 pt-3">
                 <span className="flex items-center gap-1 font-semibold">
                   <Calendar className="h-3.5 w-3.5 text-slate-400" />
                   {w.date}
                 </span>
-                <span className="inline-flex items-center gap-1 font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 text-[11px]">
-                  <CheckCircle2 className="h-3 w-3" />
-                  Verified Winner
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 text-[11px]">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Verified Winner
+                  </span>
+                  {user?.role === 'SUPER_ADMIN' && (
+                    <button
+                      onClick={() => handleDeleteWinner(w)}
+                      aria-label={`Delete achievement ${w.title}`}
+                      title="Delete achievement"
+                      className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -582,6 +628,16 @@ export const AchievementsPage: React.FC = () => {
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Winner Photo / Image URL *
                 </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                  disabled={isUploadingPhoto}
+                  className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-amber-50 file:px-4 file:py-2 file:font-bold file:text-amber-700 hover:file:bg-amber-100 disabled:opacity-50"
+                />
+                <p className="text-[11px] font-medium text-slate-400">
+                  {isUploadingPhoto ? 'Uploading photo to Supabase...' : 'Upload an image up to 5 MB, or use an image URL below.'}
+                </p>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {presetPhotos.map((p) => (
                     <button
@@ -624,7 +680,7 @@ export const AchievementsPage: React.FC = () => {
               <div className="flex items-center gap-3 pt-2">
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isUploadingPhoto}
                   className="flex-1 rounded-2xl bg-slate-900 py-3 text-xs font-bold text-white hover:bg-slate-800 shadow-md transition-all disabled:opacity-50"
                 >
                   {isSubmitting ? 'Publishing Winner...' : 'Publish to Hall of Fame'}

@@ -16,6 +16,7 @@ import {
   Send,
   X,
   Eye,
+  Trash2,
   Check,
   AlertCircle,
   FileSpreadsheet,
@@ -131,7 +132,8 @@ export const AdminEventsAndRostersPage: React.FC = () => {
         deadline: eventForm.deadline,
         maxCapacity: Number(eventForm.maxCapacity) || 100,
         eligibility: eventForm.eligibility,
-        headId: user?.id,
+        organizerRole: user?.role === 'HEAD' ? user.headTitle || 'Head Convener' : 'Super Admin',
+        headId: user?.role === 'HEAD' ? user.id : undefined,
       });
 
       setSuccessNotice(`"${res.event.title}" published! It is now live in the students' Events & Drives section.`);
@@ -152,11 +154,25 @@ export const AdminEventsAndRostersPage: React.FC = () => {
       });
       await loadEvents();
       setTimeout(() => setSuccessNotice(''), 6000);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to publish event:', err);
-      alert('Failed to publish event. Please check inputs.');
+      alert(err instanceof Error ? `Failed to publish event: ${err.message}` : 'Failed to publish event.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteEvent = async (event: EventItem) => {
+    if (!window.confirm(`Delete "${event.title}" and all of its registrations?`)) return;
+    try {
+      await api.deleteEvent(event.id);
+      setEvents((current) => current.filter((item) => item.id !== event.id));
+      setSuccessNotice(`"${event.title}" was deleted.`);
+      if (selectedEventForRoster?.id === event.id) setSelectedEventForRoster(null);
+      setTimeout(() => setSuccessNotice(''), 5000);
+    } catch (err) {
+      console.error('Failed to delete event:', err);
+      alert(err instanceof Error ? `Failed to delete event: ${err.message}` : 'Failed to delete event.');
     }
   };
 
@@ -396,14 +412,24 @@ export const AdminEventsAndRostersPage: React.FC = () => {
                 </div>
 
                 {/* Footer Action */}
-                <div className="p-5 pt-0">
+                <div className="flex gap-2 p-5 pt-0">
                   <button
                     onClick={() => openRoster(evt)}
-                    className="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition-colors"
+                    className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-slate-900 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition-colors"
                   >
                     <Eye className="h-3.5 w-3.5" />
                     <span>View Student Roster ({registeredCount})</span>
                   </button>
+                  {user?.role === 'SUPER_ADMIN' && (
+                    <button
+                      onClick={() => handleDeleteEvent(evt)}
+                      aria-label={`Delete ${evt.title}`}
+                      title="Delete event"
+                      className="rounded-2xl border border-rose-200 bg-rose-50 px-3 text-rose-600 hover:bg-rose-100"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

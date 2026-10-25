@@ -56,6 +56,7 @@ export const AdminNoticesPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
+    if (!window.confirm('Delete this notice?')) return;
     try {
       await api.deleteNotice(id);
       setNotices(notices.filter((n) => n.id !== id));

@@ -29,7 +29,8 @@ import {
   Sparkles,
   Building2,
   Mail,
-  ExternalLink
+  ExternalLink,
+  Trash2
 } from 'lucide-react';
 
 export const ScholarshipsPage: React.FC = () => {
@@ -154,6 +155,35 @@ export const ScholarshipsPage: React.FC = () => {
       setLoadError(err instanceof Error ? err.message : 'Unable to create scholarship.');
     } finally {
       setIsCreatingScholarship(false);
+    }
+  };
+
+  const handleDeleteScholarship = async (scholarship: ScholarshipItem) => {
+    if (!window.confirm(`Delete "${scholarship.name}" and its applications?`)) return;
+    setLoadError('');
+    try {
+      await api.deleteScholarship(scholarship.id);
+      setScholarships((current) => current.filter((item) => item.id !== scholarship.id));
+      setApplications((current) => current.filter((application) => application.scholarshipId !== scholarship.id));
+      setSuccessToast(`Scholarship "${scholarship.name}" deleted.`);
+      setTimeout(() => setSuccessToast(''), 4000);
+    } catch (err) {
+      console.error('Failed to delete scholarship:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to delete scholarship.');
+    }
+  };
+
+  const handleDeleteScholarshipNotice = async (notice: ScholarshipNotice) => {
+    if (!window.confirm(`Delete the notice "${notice.title}"?`)) return;
+    setLoadError('');
+    try {
+      await api.deleteNotice(notice.id);
+      setNotices((current) => current.filter((item) => item.id !== notice.id));
+      setSuccessToast(`Notice "${notice.title}" deleted.`);
+      setTimeout(() => setSuccessToast(''), 4000);
+    } catch (err) {
+      console.error('Failed to delete scholarship notice:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unable to delete scholarship notice.');
     }
   };
 
@@ -493,17 +523,29 @@ export const ScholarshipsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+                <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-4">
                   <span className="text-xs font-bold text-slate-400">
                     Quota: {s.applicantsCount} / {s.totalQuota} Applied
                   </span>
-                  <button
-                    onClick={() => setSelectedScholarshipForApply(s)}
-                    className="flex items-center gap-1.5 rounded-2xl bg-slate-900 px-5 py-2.5 text-xs font-bold text-white hover:bg-slate-800 shadow-md transition-colors"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>Apply for Scholarship</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {user?.role === 'SUPER_ADMIN' && (
+                      <button
+                        onClick={() => handleDeleteScholarship(s)}
+                        aria-label={`Delete ${s.name}`}
+                        title="Delete scholarship"
+                        className="rounded-2xl border border-rose-200 bg-rose-50 p-2.5 text-rose-600 hover:bg-rose-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setSelectedScholarshipForApply(s)}
+                      className="flex items-center gap-1.5 rounded-2xl bg-slate-900 px-5 py-2.5 text-xs font-bold text-white hover:bg-slate-800 shadow-md transition-colors"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Apply for Scholarship</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -714,13 +756,15 @@ export const ScholarshipsPage: React.FC = () => {
               </p>
             </div>
 
-            <button
-              onClick={() => setShowPostNoticeModal(true)}
-              className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 shadow-sm transition-all"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Post New Notice</span>
-            </button>
+            {user?.role === 'SUPER_ADMIN' && (
+              <button
+                onClick={() => setShowPostNoticeModal(true)}
+                className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 shadow-sm transition-all"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Post New Notice</span>
+              </button>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -744,7 +788,19 @@ export const ScholarshipsPage: React.FC = () => {
                     </span>
                     <span className="text-xs font-bold text-slate-400">• {n.category}</span>
                   </div>
-                  <span className="text-xs text-slate-400 font-semibold">{n.date}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 font-semibold">{n.date}</span>
+                    {user?.role === 'SUPER_ADMIN' && (
+                      <button
+                        onClick={() => handleDeleteScholarshipNotice(n)}
+                        aria-label={`Delete ${n.title}`}
+                        title="Delete notice"
+                        className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <h3 className="text-base font-extrabold text-slate-900 leading-snug">{n.title}</h3>

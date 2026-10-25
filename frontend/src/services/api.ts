@@ -1,8 +1,13 @@
 // Campus360 Central API Client
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
-function throwSupabaseError(error: { message: string } | null): void {
+function throwSupabaseError(error: { message: string; code?: string } | null): void {
   if (error) {
+    if (error.code === '42501' || error.message.toLowerCase().includes('row-level security')) {
+      throw new Error(
+        `Supabase blocked this operation with a row-level security policy. Run backend/supabase_content_policies.sql in the Supabase SQL Editor. Original error: ${error.message}`
+      );
+    }
     throw new Error(`Supabase request failed: ${error.message}`);
   }
 }
@@ -221,6 +226,8 @@ const STORAGE_KEYS = {
   SCHOLARSHIP_NOTICES: 'campus360_scholarship_notices_v2',
   WINNERS: 'campus360_winners_v2',
 };
+
+const ACHIEVEMENT_PHOTO_BUCKET = 'achievement-photos';
 
 // Seed Heads
 const SEED_HEADS: HeadAccount[] = [
@@ -1225,6 +1232,22 @@ export const api = {
     return { message: 'Event successfully published!', event: newEvent };
   },
 
+  deleteEvent: async (eventId: string): Promise<void> => {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase.from('events').delete().eq('id', eventId).select('id').maybeSingle();
+      throwSupabaseError(error);
+      if (!data) throw new Error('Event not found or Supabase did not allow deletion.');
+    }
+    saveStored(
+      STORAGE_KEYS.EVENTS,
+      getStored<EventItem[]>(STORAGE_KEYS.EVENTS, SEED_EVENTS).filter((event) => event.id !== eventId)
+    );
+    saveStored(
+      STORAGE_KEYS.REGS,
+      getStored<EventRegistration[]>(STORAGE_KEYS.REGS, SEED_REGISTRATIONS).filter((registration) => registration.eventId !== eventId)
+    );
+  },
+
   registerForEvent: async (
     eventId: string,
     studentData: {
@@ -1491,6 +1514,27 @@ export const api = {
     const current = getStored<ScholarshipItem[]>(STORAGE_KEYS.SCHOLARSHIPS, SEED_SCHOLARSHIPS);
     saveStored(STORAGE_KEYS.SCHOLARSHIPS, [created, ...current]);
     return created;
+  },
+
+  deleteScholarship: async (scholarshipId: string): Promise<void> => {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('scholarships')
+        .delete()
+        .eq('id', scholarshipId)
+        .select('id')
+        .maybeSingle();
+      throwSupabaseError(error);
+      if (!data) throw new Error('Scholarship not found or Supabase did not allow deletion.');
+    }
+    saveStored(
+      STORAGE_KEYS.SCHOLARSHIPS,
+      getStored<ScholarshipItem[]>(STORAGE_KEYS.SCHOLARSHIPS, SEED_SCHOLARSHIPS).filter((scholarship) => scholarship.id !== scholarshipId)
+    );
+    saveStored(
+      STORAGE_KEYS.SCHOLARSHIP_APPS,
+      getStored<ScholarshipApplicant[]>(STORAGE_KEYS.SCHOLARSHIP_APPS, SEED_SCHOLARSHIP_APPLICANTS).filter((application) => application.scholarshipId !== scholarshipId)
+    );
   },
 
   applyForScholarship: async (application: Omit<ScholarshipApplicant, 'id' | 'appliedDate' | 'status'>) => {
@@ -1802,9 +1846,14 @@ export const api = {
 
   deleteNotice: async (noticeId: string) => {
     if (isSupabaseConfigured) {
-      const { error } = await supabase.from('notices').delete().eq('id', noticeId);
+      const { data, error } = await supabase.from('notices').delete().eq('id', noticeId).select('id').maybeSingle();
       throwSupabaseError(error);
+      if (!data) throw new Error('Notice not found or Supabase did not allow deletion.');
     }
+    saveStored(
+      STORAGE_KEYS.SCHOLARSHIP_NOTICES,
+      getStored<ScholarshipNotice[]>(STORAGE_KEYS.SCHOLARSHIP_NOTICES, []).filter((notice) => notice.id !== noticeId)
+    );
     return { success: true, noticeId };
   },
 
@@ -1881,6 +1930,43 @@ export const api = {
     const current = getStored<WinnerItem[]>(STORAGE_KEYS.WINNERS, SEED_WINNERS);
     saveStored(STORAGE_KEYS.WINNERS, [newWinner, ...current]);
     return newWinner;
+  },
+
+  deleteWinner: async (winnerId: string): Promise<void> => {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase.from('winners').delete().eq('id', winnerId).select('id').maybeSingle();
+      throwSupabaseError(error);
+      if (!data) throw new Error('Achievement not found or Supabase did not allow deletion.');
+    }
+    saveStored(
+      STORAGE_KEYS.WINNERS,
+      getStored<WinnerItem[]>(STORAGE_KEYS.WINNERS, SEED_WINNERS).filter((winner) => winner.id !== winnerId)
+    );
+  },
+
+  uploadAchievementPhoto: async (file: File): Promise<string> => {
+    if (!isSupabaseConfigured) {
+      throw new Error('Configure Supabase before uploading achievement photos.');
+    }
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+      throw new Error('Choose a JPG, PNG, WEBP, or GIF image.');
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error('Achievement photos must be 5 MB or smaller.');
+    }
+
+    const extension = file.name.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+    const path = `${generateUUID()}.${extension}`;
+    const { error } = await supabase.storage
+      .from(ACHIEVEMENT_PHOTO_BUCKET)
+      .upload(path, file, { cacheControl: '3600', contentType: file.type, upsert: false });
+    throwSupabaseError(error);
+
+    const { data } = supabase.storage.from(ACHIEVEMENT_PHOTO_BUCKET).getPublicUrl(path);
+    if (!data.publicUrl) {
+      throw new Error('Supabase uploaded the photo but did not return a public URL.');
+    }
+    return data.publicUrl;
   },
 
   // Opportunities
